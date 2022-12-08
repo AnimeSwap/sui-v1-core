@@ -10,14 +10,40 @@ module defi::animeswap {
 
     /// When contract error
     const ERR_INTERNAL_ERROR: u64 = 102;
+    /// When user is not admin
+    const ERR_FORBIDDEN: u64 = 103;
+    /// When not enough amount for pool
+    const ERR_INSUFFICIENT_AMOUNT: u64 = 104;
+    /// When not enough liquidity amount
+    const ERR_INSUFFICIENT_LIQUIDITY: u64 = 105;
+    /// When not enough liquidity minted
+    const ERR_INSUFFICIENT_LIQUIDITY_MINT: u64 = 106;
+    /// When not enough liquidity burned
+    const ERR_INSUFFICIENT_LIQUIDITY_BURN: u64 = 107;
     /// When not enough X amount
     const ERR_INSUFFICIENT_X_AMOUNT: u64 = 108;
     /// When not enough Y amount
     const ERR_INSUFFICIENT_Y_AMOUNT: u64 = 109;
-    /// When not enough amount for pool
-    const ERR_INSUFFICIENT_AMOUNT: u64 = 201;
-    /// When not enough liquidity amount
-    const ERR_INSUFFICIENT_LIQUIDITY: u64 = 202;
+    /// When not enough input amount
+    const ERR_INSUFFICIENT_INPUT_AMOUNT: u64 = 110;
+    /// When not enough output amount
+    const ERR_INSUFFICIENT_OUTPUT_AMOUNT: u64 = 111;
+    /// When contract K error
+    const ERR_K_ERROR: u64 = 112;
+    /// When already exists on account
+    const ERR_PAIR_ALREADY_EXIST: u64 = 115;
+    /// When not exists on account
+    const ERR_PAIR_NOT_EXIST: u64 = 116;
+    /// When error loan amount
+    const ERR_LOAN_ERROR: u64 = 117;
+    /// When contract is not reentrant
+    const ERR_LOCK_ERROR: u64 = 118;
+    /// When pair has wrong ordering
+    const ERR_PAIR_ORDER_ERROR: u64 = 119;
+    /// When contract is paused
+    const ERR_PAUSABLE_ERROR: u64 = 120;
+
+    const MINIMUM_LIQUIDITY: u64 = 1000;
 
     struct LPCoin<phantom X, phantom Y> has drop {}
 
@@ -25,7 +51,7 @@ module defi::animeswap {
         id: UID,
         coin_x_reserve: Balance<X>,
         coin_y_reserve: Balance<Y>,
-        // cap: TreasuryCap<LPCoin<X, Y>>,
+        lp_coin_reserve: Balance<LPCoin<X, Y>>,
         lp_supply: Supply<LPCoin<X, Y>>,
     }
 
@@ -43,6 +69,10 @@ module defi::animeswap {
         assert!(reserve_x > 0 && reserve_y > 0, ERR_INSUFFICIENT_LIQUIDITY);
         let amount_y = ((amount_x as u128) * (reserve_y as u128) / (reserve_x as u128) as u64);
         amount_y
+    }
+
+    public fun sqrt(x: u64, y: u64): u64 {
+        (math::sqrt_u128((x as u128) * (y as u128)) as u64)
     }
 
     /// Calculate optimal amounts of coins to add
@@ -77,6 +107,7 @@ module defi::animeswap {
             id: object::new(ctx),
             coin_x_reserve: balance::zero<X>(),
             coin_y_reserve: balance::zero<Y>(),
+            lp_coin_reserve: balance::zero(),
             lp_supply: balance::create_supply(LPCoin<X, Y> {}),
         });
     }
@@ -91,6 +122,29 @@ module defi::animeswap {
         amount_y_min: u64,
         ctx: &mut TxContext,
     ) {
+        let lp_coins = add_liquidity<X, Y>(
+            pool,
+            coin_x_origin,
+            coin_y_origin,
+            amount_x_desired,
+            amount_y_desired,
+            amount_x_min,
+            amount_y_min,
+            ctx,
+        );
+        transfer::transfer(lp_coins, tx_context::sender(ctx));
+    }
+
+    public fun add_liquidity<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        coin_x_origin: Coin<X>,
+        coin_y_origin: Coin<Y>,
+        amount_x_desired: u64,
+        amount_y_desired: u64,
+        amount_x_min: u64,
+        amount_y_min: u64,
+        ctx: &mut TxContext,
+    ): Coin<LPCoin<X, Y>> {
         let amt_x = coin::value(&coin_x_origin);
         let amt_y = coin::value(&coin_y_origin);
 
@@ -108,9 +162,17 @@ module defi::animeswap {
         let coin_y = coin::take<Y>(coin::balance_mut<Y>(&mut coin_y_origin), amount_y, ctx);
         let lp_balance = mint<X, Y>(pool, coin_x, coin_y);
         let lp_coins = coin::from_balance<LPCoin<X, Y>>(lp_balance, ctx);
-        transfer::transfer(coin_x_origin, tx_context::sender(ctx));
-        transfer::transfer(coin_y_origin, tx_context::sender(ctx));
-        transfer::transfer(lp_coins, tx_context::sender(ctx));
+        if (coin::value(&coin_x_origin) == 0) {
+            coin::destroy_zero<X>(coin_x_origin);
+        } else {
+            transfer::transfer(coin_x_origin, tx_context::sender(ctx));
+        };
+        if (coin::value(&coin_y_origin) == 0) {
+            coin::destroy_zero<Y>(coin_y_origin);
+        } else {
+            transfer::transfer(coin_y_origin, tx_context::sender(ctx));
+        };
+        lp_coins
     }
 
     public fun mint<X, Y>(
@@ -122,8 +184,21 @@ module defi::animeswap {
         let amount_y = coin::value(&coin_y);
         balance::join<X>(&mut pool.coin_x_reserve, coin::into_balance<X>(coin_x));
         balance::join<Y>(&mut pool.coin_y_reserve, coin::into_balance<Y>(coin_y));
-        let liquidity = math::sqrt(amount_x) * math::sqrt(amount_y);
-        balance::increase_supply(&mut pool.lp_supply, liquidity)
+        let (reserve_x, reserve_y) = (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve));
+        let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
+        let liquidity;
+        if (total_supply == 0) {
+            liquidity = sqrt(amount_x, amount_y) - MINIMUM_LIQUIDITY;
+            let balance_reserve = balance::increase_supply(&mut pool.lp_supply, MINIMUM_LIQUIDITY);
+            balance::join(&mut pool.lp_coin_reserve, balance_reserve);
+        } else {
+            let amount_1 = ((amount_x as u128) * (total_supply as u128) / (reserve_x as u128) as u64);
+            let amount_2 = ((amount_y as u128) * (total_supply as u128) / (reserve_y as u128) as u64);
+            liquidity = math::min(amount_1, amount_2);
+        };
+        assert!(liquidity > 0, ERR_INSUFFICIENT_LIQUIDITY_MINT);
+        let coins = balance::increase_supply(&mut pool.lp_supply, liquidity);
+        coins
     }
 
     #[test_only]
@@ -135,33 +210,49 @@ module defi::animeswap {
 #[test_only]
 module defi::animeswap_tests {
     use sui::sui::SUI;
-    // use sui::coin::{mint_for_testing as mint, destroy_for_testing as burn};
+    use sui::coin::{mint_for_testing as mint, destroy_for_testing as burn};
+    // use sui::balance::{Self};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
-    use defi::animeswap::{Self};
+    use defi::animeswap::{Self, LiquidityPool};
+
+    const TEST_ERROR: u64 = 10000;
 
     /// Gonna be our test token.
     struct TestCoin1 has drop {}
     struct TestCoin2 has drop {}
 
-    #[test] fun test_init_pool() {
+    #[test]
+    fun test_add_lp() {
         let scenario = scenario();
-        test_init(&mut scenario);
-        test::end(scenario);
-    }
-
-    fun test_init(test: &mut Scenario) {
-        let (owner, _) = people();
-        next_tx(test, owner);
+        let (owner, one, _) = people();
+        next_tx(&mut scenario, owner);
         {
+            let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-        };
-        next_tx(test, owner);
-        {
             animeswap::create_pair_entry<SUI, TestCoin1>(ctx(test));
         };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let pool = test::take_shared<LiquidityPool<SUI, TestCoin1>>(test);
+            let pool_mut = &mut pool;
+            let lp_coins = animeswap::add_liquidity<SUI, TestCoin1>(
+                pool_mut,
+                mint<SUI>(10000, ctx(test)),
+                mint<TestCoin1>(10000, ctx(test)),
+                10000,
+                10000,
+                1,
+                1,
+                ctx(test),
+            );
+            assert!(burn(lp_coins) == 9000, TEST_ERROR);
+            test::return_shared(pool);
+        };
+        test::end(scenario);
     }
 
     // utilities
     fun scenario(): Scenario { test::begin(@0x1) }
-    fun people(): (address, address) { (@0xBEEF, @0x1337) }
+    fun people(): (address, address, address) { (@0xBEEF, @0x1111, @0x2222) }
 }
