@@ -500,6 +500,19 @@ module defi::animeswap_tests {
             assert!(burn(coins_out) == 909, TEST_ERROR);
             test::return_shared(pool);
         };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
+            let pool_mut = &mut pool;
+            let coins_out = animeswap::swap_coins_for_coins_2<TestCoin2, TestCoin1>(
+                pool_mut,
+                mint<TestCoin2>(1000, ctx(test)),
+                ctx(test),
+            );
+            assert!(burn(coins_out) == 1090, TEST_ERROR);
+            test::return_shared(pool);
+        };
         test::end(scenario);
     }
 
