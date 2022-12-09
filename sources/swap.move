@@ -87,6 +87,18 @@ module defi::animeswap {
         amount_in
     }
 
+    /// return remaining coin.
+    public fun return_remaining_coin<X>(
+        coin: Coin<X>,
+        ctx: &mut TxContext,
+    ) {
+        if (coin::value(&coin) == 0) {
+            coin::destroy_zero(coin);
+        } else {
+            transfer::transfer(coin, tx_context::sender(ctx));
+        };
+    }
+
     /// Calculate optimal amounts of coins to add
     public fun calc_optimal_coin_values<X, Y>(
         pool: &LiquidityPool<X, Y>,
@@ -195,16 +207,8 @@ module defi::animeswap {
         let coin_y = coin::take<Y>(coin::balance_mut<Y>(&mut coin_y_origin), amount_y, ctx);
         let lp_balance = mint<X, Y>(pool, coin_x, coin_y);
         let lp_coins = coin::from_balance<LPCoin<X, Y>>(lp_balance, ctx);
-        if (coin::value(&coin_x_origin) == 0) {
-            coin::destroy_zero<X>(coin_x_origin);
-        } else {
-            transfer::transfer(coin_x_origin, tx_context::sender(ctx));
-        };
-        if (coin::value(&coin_y_origin) == 0) {
-            coin::destroy_zero<Y>(coin_y_origin);
-        } else {
-            transfer::transfer(coin_y_origin, tx_context::sender(ctx));
-        };
+        return_remaining_coin(coin_x_origin, ctx);
+        return_remaining_coin(coin_y_origin, ctx);
         lp_coins
     }
 
@@ -224,12 +228,86 @@ module defi::animeswap {
         let y_out = coin::from_balance(y_balance, ctx);
         assert!(coin::value(&x_out) >= amount_x_min, ERR_INSUFFICIENT_X_AMOUNT);
         assert!(coin::value(&y_out) >= amount_y_min, ERR_INSUFFICIENT_Y_AMOUNT);
-        if (coin::value(&liquidity) == 0) {
-            coin::destroy_zero(liquidity);
-        } else {
-            transfer::transfer(liquidity, tx_context::sender(ctx));
-        };
+        return_remaining_coin(liquidity, ctx);
         (x_out, y_out)
+    }
+
+    /// swap from X to Y
+    public entry fun swap_exact_coins_for_coins_1<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_in_origin: Coin<X>,
+        amount_in: u64,
+        amount_out_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+        let balance_out = swap_coins_for_coins_1<X, Y>(pool, coin::into_balance<X>(coins_in));
+        let coins_out = coin::from_balance<Y>(balance_out, ctx);
+        assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+        return_remaining_coin(coins_in_origin, ctx);
+        transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
+    /// swap from Y to X
+    public entry fun swap_exact_coins_for_coins_2<Y, X>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_in_origin: Coin<Y>,
+        amount_in: u64,
+        amount_out_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+        let balance_out = swap_coins_for_coins_2<Y, X>(pool, coin::into_balance<Y>(coins_in));
+        let coins_out = coin::from_balance<X>(balance_out, ctx);
+        assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+        return_remaining_coin(coins_in_origin, ctx);
+        transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
+    /// swap from X to Y
+    public fun swap_coins_for_coins_1<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_in: Balance<X>,
+    ): Balance<Y> {
+        let amount_in = balance::value(&coins_in);
+        let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+        let amount_out = get_amount_out(amount_in, reserve_in, reserve_out, 0);
+        let (zero, coins_out) = swap<X, Y>(pool, coins_in, 0, balance::zero(), amount_out);
+        balance::destroy_zero<X>(zero);
+        coins_out
+    }
+
+    /// swap from Y to X
+    public fun swap_coins_for_coins_2<Y, X>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_in: Balance<Y>,
+    ): Balance<X> {
+        let amount_in = balance::value(&coins_in);
+        let (reserve_out, reserve_in) = get_reserves_size<X, Y>(pool);
+        let amount_out = get_amount_out(amount_in, reserve_in, reserve_out, 0);
+        let (coins_out, zero) = swap<X, Y>(pool, balance::zero(), amount_out, coins_in, 0);
+        balance::destroy_zero<Y>(zero);
+        coins_out
+    }
+
+    /// Swap coins
+    public fun swap<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_x_in: Balance<X>,
+        amount_x_out: u64,
+        coins_y_in: Balance<Y>,
+        amount_y_out: u64,
+    ): (Balance<X>, Balance<Y>) {
+        let amount_x_in = balance::value(&coins_x_in);
+        let amount_y_in = balance::value(&coins_y_in);
+        assert!(amount_x_in > 0 || amount_y_in > 0, ERR_INSUFFICIENT_INPUT_AMOUNT);
+        assert!(amount_x_out > 0 || amount_y_out > 0, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+        balance::join<X>(&mut pool.coin_x_reserve, coins_x_in);
+        balance::join<Y>(&mut pool.coin_y_reserve, coins_y_in);
+        let coins_x_out = balance::split(&mut pool.coin_x_reserve, amount_x_out);
+        let coins_y_out = balance::split(&mut pool.coin_y_reserve, amount_y_out);
+        // TODO assert_k_increase
+        (coins_x_out, coins_y_out)
     }
 
     public fun mint<X, Y>(
@@ -281,7 +359,6 @@ module defi::animeswap {
 
 #[test_only]
 module defi::animeswap_tests {
-    use sui::sui::SUI;
     use sui::coin::{mint_for_testing as mint, destroy_for_testing as burn};
     // use sui::balance::{Self};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
@@ -295,24 +372,24 @@ module defi::animeswap_tests {
     struct TestCoin2 has drop {}
 
     #[test]
-    fun test_add_remove_lp() {
+    fun test_add_remove_lp_basic() {
         let scenario = scenario();
         let (owner, one, _) = people();
         next_tx(&mut scenario, owner);
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            animeswap::create_pair_entry<SUI, TestCoin1>(ctx(test));
+            animeswap::create_pair_entry<TestCoin1, TestCoin2>(ctx(test));
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<SUI, TestCoin1>>(test);
+            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
             let pool_mut = &mut pool;
-            let lp_coins = animeswap::add_liquidity<SUI, TestCoin1>(
+            let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
-                mint<SUI>(10000, ctx(test)),
-                mint<TestCoin1>(20000, ctx(test)),
+                mint<TestCoin1>(10000, ctx(test)),
+                mint<TestCoin2>(20000, ctx(test)),
                 10000,
                 10000,
                 1,
@@ -325,12 +402,12 @@ module defi::animeswap_tests {
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<SUI, TestCoin1>>(test);
+            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
             let pool_mut = &mut pool;
-            let lp_coins = animeswap::add_liquidity<SUI, TestCoin1>(
+            let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
-                mint<SUI>(10000, ctx(test)),
-                mint<TestCoin1>(20000, ctx(test)),
+                mint<TestCoin1>(10000, ctx(test)),
+                mint<TestCoin2>(20000, ctx(test)),
                 10000,
                 10000,
                 1,
@@ -344,11 +421,11 @@ module defi::animeswap_tests {
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<SUI, TestCoin1>>(test);
+            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
             let pool_mut = &mut pool;
-            let (coin_x, coin_y) = animeswap::remove_liquidity<SUI, TestCoin1>(
+            let (coin_x, coin_y) = animeswap::remove_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
-                mint<LPCoin<SUI, TestCoin1>>(1000, ctx(test)),
+                mint<LPCoin<TestCoin1, TestCoin2>>(1000, ctx(test)),
                 500,
                 1,
                 1,
