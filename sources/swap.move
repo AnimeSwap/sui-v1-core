@@ -7,6 +7,7 @@ module defi::animeswap {
     use sui::transfer;
     use sui::math;
     use sui::tx_context::{Self, TxContext};
+    // use std::debug;
 
     /// When contract error
     const ERR_INTERNAL_ERROR: u64 = 102;
@@ -182,9 +183,9 @@ module defi::animeswap {
     ): Balance<LPCoin<X, Y>> {
         let amount_x = coin::value(&coin_x);
         let amount_y = coin::value(&coin_y);
+        let (reserve_x, reserve_y) = (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve));
         balance::join<X>(&mut pool.coin_x_reserve, coin::into_balance<X>(coin_x));
         balance::join<Y>(&mut pool.coin_y_reserve, coin::into_balance<Y>(coin_y));
-        let (reserve_x, reserve_y) = (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve));
         let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
         let liquidity;
         if (total_supply == 0) {
@@ -214,6 +215,7 @@ module defi::animeswap_tests {
     // use sui::balance::{Self};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
     use defi::animeswap::{Self, LiquidityPool};
+    // use std::debug;
 
     const TEST_ERROR: u64 = 10000;
 
@@ -239,7 +241,7 @@ module defi::animeswap_tests {
             let lp_coins = animeswap::add_liquidity<SUI, TestCoin1>(
                 pool_mut,
                 mint<SUI>(10000, ctx(test)),
-                mint<TestCoin1>(10000, ctx(test)),
+                mint<TestCoin1>(20000, ctx(test)),
                 10000,
                 10000,
                 1,
@@ -247,6 +249,25 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 9000, TEST_ERROR);
+            test::return_shared(pool);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let pool = test::take_shared<LiquidityPool<SUI, TestCoin1>>(test);
+            let pool_mut = &mut pool;
+            let lp_coins = animeswap::add_liquidity<SUI, TestCoin1>(
+                pool_mut,
+                mint<SUI>(10000, ctx(test)),
+                mint<TestCoin1>(20000, ctx(test)),
+                10000,
+                10000,
+                1,
+                1,
+                ctx(test),
+            );
+
+            assert!(burn(lp_coins) == 10000, TEST_ERROR);
             test::return_shared(pool);
         };
         test::end(scenario);
