@@ -7,6 +7,7 @@ module defi::animeswap {
     use sui::transfer;
     use sui::math;
     use sui::tx_context::{Self, TxContext};
+    use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in};
     // use std::debug;
 
     /// When contract error
@@ -60,20 +61,30 @@ module defi::animeswap {
     /// To publish a new Pool one has to create a type which will mark LPCoins.
     fun init(_: &mut TxContext) {}
 
-    /// given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    public fun quote(
-        amount_x: u64,
-        reserve_x: u64,
-        reserve_y: u64
-    ): u64 {
-        assert!(amount_x > 0, ERR_INSUFFICIENT_AMOUNT);
-        assert!(reserve_x > 0 && reserve_y > 0, ERR_INSUFFICIENT_LIQUIDITY);
-        let amount_y = ((amount_x as u128) * (reserve_y as u128) / (reserve_x as u128) as u64);
-        amount_y
+    /// get reserves size
+    /// always return (X_reserve, Y_reserve)
+    public fun get_reserves_size<X, Y>(pool: &LiquidityPool<X, Y>): (u64, u64) {
+        (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve))
     }
 
-    public fun sqrt(x: u64, y: u64): u64 {
-        (math::sqrt_u128((x as u128) * (y as u128)) as u64)
+    /// get amounts out, 1 pair
+    public fun get_amounts_out<X, Y>(
+        pool: &LiquidityPool<X, Y>,
+        amount_in: u64,
+    ): u64 {
+        let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+        let amount_out = get_amount_out(amount_in, reserve_in, reserve_out, 0);
+        amount_out
+    }
+
+    /// get amounts in, 1 pair
+    public fun get_amounts_in<X, Y>(
+        pool: &LiquidityPool<X, Y>,
+        amount_out: u64,
+    ): u64 {
+        let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+        let amount_in = get_amount_in(amount_out, reserve_in, reserve_out, 0);
+        amount_in
     }
 
     /// Calculate optimal amounts of coins to add
@@ -84,7 +95,7 @@ module defi::animeswap {
         amount_x_min: u64,
         amount_y_min: u64
     ): (u64, u64) {
-        let (reserve_x, reserve_y) = (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve));
+        let (reserve_x, reserve_y) = get_reserves_size(pool);
         if (reserve_x == 0 && reserve_y == 0) {
             (amount_x_desired, amount_y_desired)
         } else {
@@ -178,7 +189,8 @@ module defi::animeswap {
             && amount_y_min > 0,
             ERR_INSUFFICIENT_Y_AMOUNT);
 
-        let (amount_x, amount_y) = calc_optimal_coin_values<X, Y>(pool, amount_x_desired, amount_y_desired, amount_x_min, amount_y_min);
+        let (amount_x, amount_y) =
+            calc_optimal_coin_values<X, Y>(pool, amount_x_desired, amount_y_desired, amount_x_min, amount_y_min);
         let coin_x = coin::take<X>(coin::balance_mut<X>(&mut coin_x_origin), amount_x, ctx);
         let coin_y = coin::take<Y>(coin::balance_mut<Y>(&mut coin_y_origin), amount_y, ctx);
         let lp_balance = mint<X, Y>(pool, coin_x, coin_y);
@@ -227,7 +239,7 @@ module defi::animeswap {
     ): Balance<LPCoin<X, Y>> {
         let amount_x = coin::value(&coin_x);
         let amount_y = coin::value(&coin_y);
-        let (reserve_x, reserve_y) = (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve));
+        let (reserve_x, reserve_y) = get_reserves_size(pool);
         let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
         balance::join<X>(&mut pool.coin_x_reserve, coin::into_balance<X>(coin_x));
         balance::join<Y>(&mut pool.coin_y_reserve, coin::into_balance<Y>(coin_y));
@@ -251,7 +263,7 @@ module defi::animeswap {
         liquidity: Coin<LPCoin<X, Y>>,
     ): (Balance<X>, Balance<Y>) {
         let liquidity_amount = coin::value(&liquidity);
-        let (reserve_x, reserve_y) = (balance::value(&pool.coin_x_reserve), balance::value(&pool.coin_y_reserve));
+        let (reserve_x, reserve_y) = get_reserves_size(pool);
         let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
         let amount_x = ((liquidity_amount as u128) * (reserve_x as u128) / (total_supply as u128) as u64);
         let amount_y = ((liquidity_amount as u128) * (reserve_y as u128) / (total_supply as u128) as u64);
