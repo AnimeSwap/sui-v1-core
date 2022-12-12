@@ -7,7 +7,7 @@ module defi::animeswap {
     use sui::transfer;
     use sui::math;
     use sui::tx_context::{Self, TxContext};
-    use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in};
+    use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare};
     // use std::debug;
 
     /// When contract error
@@ -137,6 +137,7 @@ module defi::animeswap {
     public entry fun create_pair_entry<X, Y>(
         ctx: &mut TxContext,
     ) {
+        assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
         transfer::share_object(LiquidityPool<X, Y> {
             id: object::new(ctx),
             coin_x_reserve: balance::zero<X>(),
