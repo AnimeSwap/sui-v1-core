@@ -157,6 +157,8 @@ module defi::animeswap {
         )
     }
 
+    /// create pair entry function
+    /// require X < Y
     public entry fun create_pair_entry<X, Y>(
         lps: &mut LiquidityPools,
         ctx: &mut TxContext,
@@ -173,6 +175,8 @@ module defi::animeswap {
         ofield::add(&mut lps.id, get_lp_name<X, Y>(), lp);
     }
 
+    /// add liqudity entry function
+    /// require X < Y
     public entry fun add_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
         coin_x_origin: Coin<X>,
@@ -197,6 +201,8 @@ module defi::animeswap {
         transfer::transfer(lp_coins, tx_context::sender(ctx));
     }
 
+    /// remove liqudity entry function
+    /// require X < Y
     public entry fun remove_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
         liquidity: Coin<LPCoin<X, Y>>,
@@ -218,6 +224,8 @@ module defi::animeswap {
         transfer::transfer(coin_y, tx_context::sender(ctx));
     }
 
+    /// add liqudity
+    /// require X < Y
     public fun add_liquidity<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         coin_x_origin: Coin<X>,
@@ -251,6 +259,8 @@ module defi::animeswap {
         lp_coins
     }
 
+    /// remove liqudity
+    /// require X < Y
     public fun remove_liquidity<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         liquidity: Coin<LPCoin<X, Y>>,
@@ -271,77 +281,66 @@ module defi::animeswap {
         (x_out, y_out)
     }
 
-    /// entry, swap from X to Y
-    public entry fun swap_exact_coins_for_coins_x_y<X, Y>(
+    /// entry, swap from exact X to Y
+    /// no require for X Y order
+    public entry fun swap_exact_coins_for_coins<X, Y>(
         lps: &mut LiquidityPools,
         coins_in_origin: Coin<X>,
         amount_in: u64,
         amount_out_min: u64,
         ctx: &mut TxContext,
     ) {
-        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
-        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-        let (zero, coins_out) = swap_coins_for_coins<X, Y>(pool, coins_in, coin::zero(ctx), ctx);
-        coin::destroy_zero(zero);
-        assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
-        return_remaining_coin(coins_in_origin, ctx);
-        transfer::transfer(coins_out, tx_context::sender(ctx));
+        if (compare<X, Y>()) {
+            let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            let (zero, coins_out) = swap_coins_for_coins<X, Y>(pool, coins_in, coin::zero(ctx), ctx);
+            coin::destroy_zero(zero);
+            assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+            return_remaining_coin(coins_in_origin, ctx);
+            transfer::transfer(coins_out, tx_context::sender(ctx));
+        } else {
+            let pool = ofield::borrow_mut<String, LiquidityPool<Y, X>>(&mut lps.id, get_lp_name<Y, X>());
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            let (coins_out, zero) = swap_coins_for_coins<Y, X>(pool, coin::zero(ctx), coins_in, ctx);
+            coin::destroy_zero(zero);
+            assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+            return_remaining_coin(coins_in_origin, ctx);
+            transfer::transfer(coins_out, tx_context::sender(ctx));
+        }
     }
 
-    /// entry, swap from Y to X
-    public entry fun swap_exact_coins_for_coins_y_x<X, Y>(
-        lps: &mut LiquidityPools,
-        coins_in_origin: Coin<Y>,
-        amount_in: u64,
-        amount_out_min: u64,
-        ctx: &mut TxContext,
-    ) {
-        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
-        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-        let (coins_out, zero) = swap_coins_for_coins<X, Y>(pool, coin::zero(ctx), coins_in, ctx);
-        coin::destroy_zero(zero);
-        assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
-        return_remaining_coin(coins_in_origin, ctx);
-        transfer::transfer(coins_out, tx_context::sender(ctx));
-    }
-
-    /// entry, swap from X to Y
-    public entry fun swap_coins_for_exact_coins_x_y<X, Y>(
+    /// entry, swap from X to exact Y
+    /// no require for X Y order
+    public entry fun swap_coins_for_exact_coins<X, Y>(
         lps: &mut LiquidityPools,
         coins_in_origin: Coin<X>,
         amount_out: u64,
         amount_in_max: u64,
         ctx: &mut TxContext,
     ) {
-        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
-        let amount_in = get_amounts_in<X, Y>(pool, amount_out, true);
-        assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
-        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-        let (zero, coins_out) = swap_coins_for_coins<X, Y>(pool, coins_in, coin::zero(ctx), ctx);
-        coin::destroy_zero(zero);
-        return_remaining_coin(coins_in_origin, ctx);
-        transfer::transfer(coins_out, tx_context::sender(ctx));
+        if (compare<X, Y>()) {
+            let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
+            let amount_in = get_amounts_in<X, Y>(pool, amount_out, true);
+            assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            let (zero, coins_out) = swap_coins_for_coins<X, Y>(pool, coins_in, coin::zero(ctx), ctx);
+            coin::destroy_zero(zero);
+            return_remaining_coin(coins_in_origin, ctx);
+            transfer::transfer(coins_out, tx_context::sender(ctx));
+        } else {
+            let pool = ofield::borrow_mut<String, LiquidityPool<Y, X>>(&mut lps.id, get_lp_name<Y, X>());
+            let amount_in = get_amounts_in<Y, X>(pool, amount_out, false);
+            assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            let (coins_out, zero) = swap_coins_for_coins<Y, X>(pool, coin::zero(ctx), coins_in, ctx);
+            coin::destroy_zero(zero);
+            return_remaining_coin(coins_in_origin, ctx);
+            transfer::transfer(coins_out, tx_context::sender(ctx));
+        }
     }
 
-    /// entry, swap from Y to X
-    public entry fun swap_coins_for_exact_coins_y_x<X, Y>(
-        lps: &mut LiquidityPools,
-        coins_in_origin: Coin<Y>,
-        amount_out: u64,
-        amount_in_max: u64,
-        ctx: &mut TxContext,
-    ) {
-        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
-        let amount_in = get_amounts_in<X, Y>(pool, amount_out, false);
-        assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
-        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-        let (coins_out, zero) = swap_coins_for_coins<X, Y>(pool, coin::zero(ctx), coins_in, ctx);
-        coin::destroy_zero(zero);
-        return_remaining_coin(coins_in_origin, ctx);
-        transfer::transfer(coins_out, tx_context::sender(ctx));
-    }
-
-    /// swap from Coin to Coin
+    /// swap from Coin to Coin, both sides
+    /// require X < Y
     public fun swap_coins_for_coins<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         coins_x_in: Coin<X>,
@@ -353,7 +352,8 @@ module defi::animeswap {
         (coin::from_balance<X>(balance_x_out, ctx), coin::from_balance<Y>(balance_y_out, ctx))
     }
 
-    /// swap from Balance to Balance
+    /// swap from Balance to Balance, both sides
+    /// require X < Y
     public fun swap_balance_for_balance<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         coins_x_in: Balance<X>,
@@ -373,7 +373,8 @@ module defi::animeswap {
         }
     }
 
-    /// Swap coins
+    /// Swap coins, both sides
+    /// require X < Y
     public fun swap<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         coins_x_in: Balance<X>,
@@ -393,6 +394,8 @@ module defi::animeswap {
         (coins_x_out, coins_y_out)
     }
 
+    /// mint lp
+    /// require X < Y
     public fun mint<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         coin_x: Balance<X>,
@@ -419,6 +422,8 @@ module defi::animeswap {
         coins
     }
 
+    /// burn lp
+    /// require X < Y
     public fun burn<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
         liquidity: Balance<LPCoin<X, Y>>,
