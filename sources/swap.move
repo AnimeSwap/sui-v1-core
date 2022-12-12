@@ -7,6 +7,9 @@ module defi::animeswap {
     use sui::transfer;
     use sui::math;
     use sui::tx_context::{Self, TxContext};
+    use std::type_name;
+    use std::ascii::String;
+    use sui::dynamic_object_field as ofield;
     use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare};
     // use std::debug;
 
@@ -51,7 +54,7 @@ module defi::animeswap {
 
     struct LPCoin<phantom X, phantom Y> has drop {}
 
-    struct LiquidityPool<phantom X, phantom Y> has key {
+    struct LiquidityPool<phantom X, phantom Y> has key, store {
         id: UID,
         coin_x_reserve: Balance<X>,
         coin_y_reserve: Balance<Y>,
@@ -59,9 +62,20 @@ module defi::animeswap {
         lp_supply: Supply<LPCoin<X, Y>>,
     }
 
-    /// Module initializer is empty
+    struct LiquidityPools has key {
+        id: UID,
+    }
+
     /// To publish a new Pool one has to create a type which will mark LPCoins.
-    fun init(_: &mut TxContext) {}
+    fun init(ctx: &mut TxContext) {
+        transfer::share_object(LiquidityPools {
+            id: object::new(ctx),
+        });
+    }
+
+    public fun get_lp_name<X, Y>(): String {
+        type_name::into_string(type_name::get<LPCoin<X, Y>>())
+    }
 
     /// get reserves size
     /// always return (X_reserve, Y_reserve)
@@ -134,21 +148,33 @@ module defi::animeswap {
         }
     }
 
+    /// get pool
+    public fun get_pool<X, Y>(
+        lps: &mut LiquidityPools,
+    ): &mut LiquidityPool<X, Y> {
+        ofield::borrow_mut<String, LiquidityPool<X, Y>>(
+            &mut lps.id, get_lp_name<X, Y>()
+        )
+    }
+
     public entry fun create_pair_entry<X, Y>(
+        lps: &mut LiquidityPools,
         ctx: &mut TxContext,
     ) {
         assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
-        transfer::share_object(LiquidityPool<X, Y> {
+        assert!(!ofield::exists_<String>(&mut lps.id, get_lp_name<X, Y>()), ERR_PAIR_ALREADY_EXIST);
+        let lp = LiquidityPool<X, Y> {
             id: object::new(ctx),
             coin_x_reserve: balance::zero<X>(),
             coin_y_reserve: balance::zero<Y>(),
             lp_coin_reserve: balance::zero(),
             lp_supply: balance::create_supply(LPCoin<X, Y> {}),
-        });
+        };
+        ofield::add(&mut lps.id, get_lp_name<X, Y>(), lp);
     }
 
     public entry fun add_liquidity_entry<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         coin_x_origin: Coin<X>,
         coin_y_origin: Coin<Y>,
         amount_x_desired: u64,
@@ -157,6 +183,7 @@ module defi::animeswap {
         amount_y_min: u64,
         ctx: &mut TxContext,
     ) {
+        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
         let lp_coins = add_liquidity<X, Y>(
             pool,
             coin_x_origin,
@@ -171,13 +198,14 @@ module defi::animeswap {
     }
 
     public entry fun remove_liquidity_entry<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         liquidity: Coin<LPCoin<X, Y>>,
         liquidity_desired: u64,
         amount_x_min: u64,
         amount_y_min: u64,
         ctx: &mut TxContext,
     ) {
+        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
         let (coin_x, coin_y) = remove_liquidity<X, Y>(
             pool,
             liquidity,
@@ -245,12 +273,13 @@ module defi::animeswap {
 
     /// entry, swap from X to Y
     public entry fun swap_exact_coins_for_coins_x_y<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         coins_in_origin: Coin<X>,
         amount_in: u64,
         amount_out_min: u64,
         ctx: &mut TxContext,
     ) {
+        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
         let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
         let (zero, coins_out) = swap_coins_for_coins<X, Y>(pool, coins_in, coin::zero(ctx), ctx);
         coin::destroy_zero(zero);
@@ -261,12 +290,13 @@ module defi::animeswap {
 
     /// entry, swap from Y to X
     public entry fun swap_exact_coins_for_coins_y_x<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         coins_in_origin: Coin<Y>,
         amount_in: u64,
         amount_out_min: u64,
         ctx: &mut TxContext,
     ) {
+        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
         let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
         let (coins_out, zero) = swap_coins_for_coins<X, Y>(pool, coin::zero(ctx), coins_in, ctx);
         coin::destroy_zero(zero);
@@ -277,12 +307,13 @@ module defi::animeswap {
 
     /// entry, swap from X to Y
     public entry fun swap_coins_for_exact_coins_x_y<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         coins_in_origin: Coin<X>,
         amount_out: u64,
         amount_in_max: u64,
         ctx: &mut TxContext,
     ) {
+        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
         let amount_in = get_amounts_in<X, Y>(pool, amount_out, true);
         assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
         let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
@@ -294,12 +325,13 @@ module defi::animeswap {
 
     /// entry, swap from Y to X
     public entry fun swap_coins_for_exact_coins_y_x<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         coins_in_origin: Coin<Y>,
         amount_out: u64,
         amount_in_max: u64,
         ctx: &mut TxContext,
     ) {
+        let pool = ofield::borrow_mut<String, LiquidityPool<X, Y>>(&mut lps.id, get_lp_name<X, Y>());
         let amount_in = get_amounts_in<X, Y>(pool, amount_out, false);
         assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
         let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
@@ -414,7 +446,7 @@ module defi::animeswap_tests {
     // use sui::balance::{Self};
     use sui::coin::{Self};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
-    use defi::animeswap::{Self, LPCoin, LiquidityPool};
+    use defi::animeswap::{Self, LiquidityPools, LPCoin};
     // use std::debug;
 
     const TEST_ERROR: u64 = 10000;
@@ -426,18 +458,24 @@ module defi::animeswap_tests {
     #[test]
     fun test_add_remove_lp_basic() {
         let scenario = scenario();
-        let (owner, one, _) = people();
+        let (owner, one, two) = people();
         next_tx(&mut scenario, owner);
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            animeswap::create_pair_entry<TestCoin1, TestCoin2>(ctx(test));
+        };
+        next_tx(&mut scenario, two);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
-            let pool_mut = &mut pool;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let pool_mut = animeswap::get_pool<TestCoin1, TestCoin2>(&mut lps);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
                 mint<TestCoin1>(10000, ctx(test)),
@@ -449,13 +487,13 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 9000, TEST_ERROR);
-            test::return_shared(pool);
+            test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
-            let pool_mut = &mut pool;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let pool_mut = animeswap::get_pool<TestCoin1, TestCoin2>(&mut lps);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
                 mint<TestCoin1>(10000, ctx(test)),
@@ -468,13 +506,13 @@ module defi::animeswap_tests {
             );
 
             assert!(burn(lp_coins) == 10000, TEST_ERROR);
-            test::return_shared(pool);
+            test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
-            let pool_mut = &mut pool;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let pool_mut = animeswap::get_pool<TestCoin1, TestCoin2>(&mut lps);
             let (coin_x, coin_y) = animeswap::remove_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
                 mint<LPCoin<TestCoin1, TestCoin2>>(1000, ctx(test)),
@@ -486,7 +524,7 @@ module defi::animeswap_tests {
 
             assert!(burn(coin_x) == 500, TEST_ERROR);
             assert!(burn(coin_y) == 500, TEST_ERROR);
-            test::return_shared(pool);
+            test::return_shared(lps);
         };
         test::end(scenario);
     }
@@ -499,13 +537,19 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            animeswap::create_pair_entry<TestCoin1, TestCoin2>(ctx(test));
+        };
+        next_tx(&mut scenario, owner);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
-            let pool_mut = &mut pool;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let pool_mut = animeswap::get_pool<TestCoin1, TestCoin2>(&mut lps);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 pool_mut,
                 mint<TestCoin1>(10000, ctx(test)),
@@ -517,13 +561,13 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 9000, TEST_ERROR);
-            test::return_shared(pool);
+            test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
-            let pool_mut = &mut pool;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let pool_mut = animeswap::get_pool<TestCoin1, TestCoin2>(&mut lps);
             let (zero, coins_out) = animeswap::swap_coins_for_coins<TestCoin1, TestCoin2>(
                 pool_mut,
                 mint<TestCoin1>(1000, ctx(test)),
@@ -532,13 +576,13 @@ module defi::animeswap_tests {
             );
             coin::destroy_zero(zero);
             assert!(burn(coins_out) == 909, TEST_ERROR);
-            test::return_shared(pool);
+            test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
-            let pool = test::take_shared<LiquidityPool<TestCoin1, TestCoin2>>(test);
-            let pool_mut = &mut pool;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let pool_mut = animeswap::get_pool<TestCoin1, TestCoin2>(&mut lps);
             let (coins_out, zero) = animeswap::swap_coins_for_coins<TestCoin1, TestCoin2>(
                 pool_mut,
                 coin::zero(ctx(test)),
@@ -547,7 +591,34 @@ module defi::animeswap_tests {
             );
             coin::destroy_zero(zero);
             assert!(burn(coins_out) == 1090, TEST_ERROR);
-            test::return_shared(pool);
+            test::return_shared(lps);
+        };
+        test::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = animeswap::ERR_PAIR_ALREADY_EXIST)]
+    fun test_create_lp_dup_error() {
+        let scenario = scenario();
+        let (owner, one, two) = people();
+        next_tx(&mut scenario, owner);
+        {
+            let test = &mut scenario;
+            animeswap::init_for_testing(ctx(test));
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, two);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            test::return_shared(lps);
         };
         test::end(scenario);
     }
