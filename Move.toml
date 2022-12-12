@@ -7,5 +7,6 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 #Sui = { local = "/home/zzzkky/Desktop/project/sui/crates/sui-framework" }
 
 [addresses]
-defi =  "0x0"
-sui =  "0000000000000000000000000000000000000002"
+defi = "0x0"
+sui = "0x2"
+std = "0x1"

@@ -1,5 +1,8 @@
 module defi::animeswap_library {
     use sui::math;
+    use std::vector;
+    use std::ascii;
+    use std::type_name;
 
     /// When not enough amount for pool
     const ERR_INSUFFICIENT_AMOUNT: u64 = 201;
@@ -60,5 +63,54 @@ module defi::animeswap_library {
 
     public fun sqrt(x: u64, y: u64): u64 {
         (math::sqrt_u128((x as u128) * (y as u128)) as u64)
+    }
+
+    // compare type, when use, true iff: X < Y
+    public fun compare<X, Y>(): bool {
+        let type_name_x = type_name::into_string(type_name::get<X>());
+        let type_name_y = type_name::into_string(type_name::get<Y>());
+
+        let length_x = ascii::length(&type_name_x);
+        let length_y = ascii::length(&type_name_y);
+
+        let bytes_x = ascii::into_bytes(type_name_x);
+        let bytes_y = ascii::into_bytes(type_name_y);
+
+        if (length_x < length_y) return true;
+        if (length_x > length_y) return false;
+
+        let idx = 0;
+        while (idx < length_x) {
+            let byte_x = *vector::borrow(&bytes_x, idx);
+            let byte_y = *vector::borrow(&bytes_y, idx);
+            if (byte_x < byte_y) {
+                return true
+            } else if (byte_x > byte_y) {
+                return false
+            };
+            idx = idx + 1;
+        };
+
+        assert!(false, ERR_COIN_TYPE_SAME_ERROR);
+        false
+    }
+
+    #[test_only]
+    const TEST_ERROR:u64 = 10000;
+    #[test_only]
+    struct TestCoinA {}
+    #[test_only]
+    struct TestCoinB {}
+    #[test_only]
+    struct TestCoinAA {}
+
+    #[test]
+    public entry fun test_compare() {
+        let a = compare<TestCoinA, TestCoinB>();
+        assert!(a == true, TEST_ERROR);
+        let a = compare<TestCoinB, TestCoinAA>();
+        assert!(a == true, TEST_ERROR);
+        let a = compare<TestCoinAA, TestCoinA>();
+        assert!(a == false, TEST_ERROR);
     }
 }
