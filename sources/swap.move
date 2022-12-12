@@ -73,8 +73,12 @@ module defi::animeswap {
     public fun get_amounts_out<X, Y>(
         pool: &LiquidityPool<X, Y>,
         amount_in: u64,
+        x_y: bool,
     ): u64 {
         let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+        if (!x_y) {
+            (reserve_in, reserve_out) = (reserve_out, reserve_in);
+        };
         let amount_out = get_amount_out(amount_in, reserve_in, reserve_out, 0);
         amount_out
     }
@@ -83,8 +87,12 @@ module defi::animeswap {
     public fun get_amounts_in<X, Y>(
         pool: &LiquidityPool<X, Y>,
         amount_out: u64,
+        x_y: bool,
     ): u64 {
         let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+        if (!x_y) {
+            (reserve_in, reserve_out) = (reserve_out, reserve_in);
+        };
         let amount_in = get_amount_in(amount_out, reserve_in, reserve_out, 0);
         amount_in
     }
@@ -262,6 +270,40 @@ module defi::animeswap {
         let (coins_out, zero) = swap_coins_for_coins<X, Y>(pool, coin::zero(ctx), coins_in, ctx);
         coin::destroy_zero(zero);
         assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+        return_remaining_coin(coins_in_origin, ctx);
+        transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
+    /// entry, swap from X to Y
+    public entry fun swap_coins_for_exact_coins_x_y<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_in_origin: Coin<X>,
+        amount_out: u64,
+        amount_in_max: u64,
+        ctx: &mut TxContext,
+    ) {
+        let amount_in = get_amounts_in<X, Y>(pool, amount_out, true);
+        assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
+        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+        let (zero, coins_out) = swap_coins_for_coins<X, Y>(pool, coins_in, coin::zero(ctx), ctx);
+        coin::destroy_zero(zero);
+        return_remaining_coin(coins_in_origin, ctx);
+        transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
+    /// entry, swap from Y to X
+    public entry fun swap_coins_for_exact_coins_y_x<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        coins_in_origin: Coin<Y>,
+        amount_out: u64,
+        amount_in_max: u64,
+        ctx: &mut TxContext,
+    ) {
+        let amount_in = get_amounts_in<X, Y>(pool, amount_out, false);
+        assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
+        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+        let (coins_out, zero) = swap_coins_for_coins<X, Y>(pool, coin::zero(ctx), coins_in, ctx);
+        coin::destroy_zero(zero);
         return_remaining_coin(coins_in_origin, ctx);
         transfer::transfer(coins_out, tx_context::sender(ctx));
     }
