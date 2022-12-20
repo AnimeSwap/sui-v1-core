@@ -10,3 +10,4 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 defi = "0x0"
 sui = "0x2"
 std = "0x1"
+deployer = "0x9776178d9bfd7d4342a15e85d779368114f39f5b"
