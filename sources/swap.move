@@ -60,6 +60,10 @@ module defi::animeswap {
         coin_y_reserve: Balance<Y>,
         lp_coin_reserve: Balance<LPCoin<X, Y>>,
         lp_supply: Supply<LPCoin<X, Y>>,
+        last_block_timestamp: u64,
+        last_price_x_cumulative: u128,
+        last_price_y_cumulative: u128,
+        k_last: u128,
     }
 
     // global config
@@ -192,6 +196,10 @@ module defi::animeswap {
             coin_y_reserve: balance::zero<Y>(),
             lp_coin_reserve: balance::zero(),
             lp_supply: balance::create_supply(LPCoin<X, Y> {}),
+            last_block_timestamp: 0,
+            last_price_x_cumulative: 0,
+            last_price_y_cumulative: 0,
+            k_last: 0,
         };
         ofield::add(&mut lps.id, get_lp_name<X, Y>(), lp);
     }
@@ -419,16 +427,19 @@ module defi::animeswap {
     /// require X < Y
     public fun mint<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
-        _admin_data: AdminData,
+        admin_data: AdminData,
         coin_x: Balance<X>,
         coin_y: Balance<Y>,
     ): Balance<LPCoin<X, Y>> {
+        // feeOn
+        let fee_on = mint_fee_internal<X, Y>(pool, admin_data);
         let amount_x = balance::value(&coin_x);
         let amount_y = balance::value(&coin_y);
         let (reserve_x, reserve_y) = get_reserves_size(pool);
         let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
         balance::join<X>(&mut pool.coin_x_reserve, coin_x);
         balance::join<Y>(&mut pool.coin_y_reserve, coin_y);
+        let (balance_x, balance_y) = get_reserves_size(pool);
         let liquidity;
         if (total_supply == 0) {
             liquidity = sqrt(amount_x, amount_y) - MINIMUM_LIQUIDITY;
@@ -441,6 +452,8 @@ module defi::animeswap {
         };
         assert!(liquidity > 0, ERR_INSUFFICIENT_LIQUIDITY_MINT);
         let coins = balance::increase_supply(&mut pool.lp_supply, liquidity);
+        // feeOn
+        if (fee_on) pool.k_last = (balance_x as u128) * (balance_y as u128);
         coins
     }
 
@@ -448,9 +461,11 @@ module defi::animeswap {
     /// require X < Y
     public fun burn<X, Y>(
         pool: &mut LiquidityPool<X, Y>,
-        _admin_data: AdminData,
+        admin_data: AdminData,
         liquidity: Balance<LPCoin<X, Y>>,
     ): (Balance<X>, Balance<Y>) {
+        // feeOn
+        let fee_on = mint_fee_internal<X, Y>(pool, admin_data);
         let liquidity_amount = balance::value(&liquidity);
         let (reserve_x, reserve_y) = get_reserves_size(pool);
         let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
@@ -458,8 +473,43 @@ module defi::animeswap {
         let amount_y = ((liquidity_amount as u128) * (reserve_y as u128) / (total_supply as u128) as u64);
         let x_coin_to_return = balance::split(&mut pool.coin_x_reserve, amount_x);
         let y_coin_to_return = balance::split(&mut pool.coin_y_reserve, amount_y);
+        let (balance_x, balance_y) = get_reserves_size(pool);
         balance::decrease_supply(&mut pool.lp_supply, liquidity);
+        // feeOn
+        if (fee_on) pool.k_last = (balance_x as u128) * (balance_y as u128);
         (x_coin_to_return, y_coin_to_return)
+    }
+
+    fun mint_fee_internal<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        admin_data: AdminData,
+    ): bool {
+        let fee_on = admin_data.dao_fee_on;
+        let k_last = pool.k_last;
+        if (fee_on) {
+            if (k_last != 0) {
+                let (reserve_x, reserve_y) = get_reserves_size(pool);
+                let root_k = sqrt(reserve_x, reserve_y);
+                let root_k_last = (math::sqrt_u128(k_last) as u64);
+                let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
+                if (root_k > root_k_last) {
+                    let delta_k = ((root_k - root_k_last) as u128);
+                    // TODO overflow
+                    {
+                        let numerator = (total_supply as u128) * delta_k;
+                        let denominator = (root_k as u128) * (admin_data.dao_fee as u128) + (root_k_last as u128);
+                        let liquidity = ((numerator / denominator) as u64);
+                        if (liquidity > 0) {
+                            let balance = balance::increase_supply(&mut pool.lp_supply, liquidity);
+                            balance::join(&mut pool.lp_coin_reserve, balance);
+                        };
+                    };
+                }
+            }
+        } else if (k_last != 0) {
+            pool.k_last = 0;
+        };
+        fee_on
     }
 
     #[test_only]
