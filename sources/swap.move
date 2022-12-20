@@ -151,12 +151,13 @@ module defi::animeswap {
 
     /// Calculate optimal amounts of coins to add
     public fun calc_optimal_coin_values<X, Y>(
-        pool: &LiquidityPool<X, Y>,
+        lps: &mut LiquidityPools,
         amount_x_desired: u64,
         amount_y_desired: u64,
         amount_x_min: u64,
         amount_y_min: u64
     ): (u64, u64) {
+        let (pool, _) = get_pool<X, Y>(lps);
         let (reserve_x, reserve_y) = get_reserves_size(pool);
         if (reserve_x == 0 && reserve_y == 0) {
             (amount_x_desired, amount_y_desired)
@@ -265,7 +266,6 @@ module defi::animeswap {
         amount_y_min: u64,
         ctx: &mut TxContext,
     ): Coin<LPCoin<X, Y>> {
-        let (pool, admin_data) = get_pool<X, Y>(lps);
         let amt_x = coin::value(&coin_x_origin);
         let amt_y = coin::value(&coin_y_origin);
 
@@ -279,10 +279,10 @@ module defi::animeswap {
             ERR_INSUFFICIENT_Y_AMOUNT);
 
         let (amount_x, amount_y) =
-            calc_optimal_coin_values<X, Y>(pool, amount_x_desired, amount_y_desired, amount_x_min, amount_y_min);
+            calc_optimal_coin_values<X, Y>(lps, amount_x_desired, amount_y_desired, amount_x_min, amount_y_min);
         let coin_x = coin::split(&mut coin_x_origin, amount_x, ctx);
         let coin_y = coin::split(&mut coin_y_origin, amount_y, ctx);
-        let lp_balance = mint<X, Y>(pool, admin_data, coin::into_balance<X>(coin_x), coin::into_balance<Y>(coin_y));
+        let lp_balance = mint<X, Y>(lps, coin::into_balance<X>(coin_x), coin::into_balance<Y>(coin_y));
         let lp_coins = coin::from_balance<LPCoin<X, Y>>(lp_balance, ctx);
         return_remaining_coin(coin_x_origin, ctx);
         return_remaining_coin(coin_y_origin, ctx);
@@ -299,11 +299,10 @@ module defi::animeswap {
         amount_y_min: u64,
         ctx: &mut TxContext,
     ): (Coin<X>, Coin<Y>) {
-        let (pool, admin_data) = get_pool<X, Y>(lps);
         let amt_lp = coin::value(&liquidity);
         assert!(amt_lp >= liquidity_desired, ERR_INSUFFICIENT_INPUT_AMOUNT);
         let coin_lp = coin::split(&mut liquidity, liquidity_desired, ctx);
-        let (x_balance, y_balance) = burn<X, Y>(pool, admin_data, coin::into_balance(coin_lp));
+        let (x_balance, y_balance) = burn<X, Y>(lps, coin::into_balance(coin_lp));
         let x_out = coin::from_balance(x_balance, ctx);
         let y_out = coin::from_balance(y_balance, ctx);
         assert!(coin::value(&x_out) >= amount_x_min, ERR_INSUFFICIENT_X_AMOUNT);
@@ -429,13 +428,13 @@ module defi::animeswap {
     /// mint lp
     /// require X < Y
     public fun mint<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
-        admin_data: AdminData,
+        lps: &mut LiquidityPools,
         coin_x: Balance<X>,
         coin_y: Balance<Y>,
     ): Balance<LPCoin<X, Y>> {
         // feeOn
-        let fee_on = mint_fee_internal<X, Y>(pool, admin_data);
+        let fee_on = mint_fee_internal<X, Y>(lps);
+        let (pool, _) = get_pool<X, Y>(lps);
         let amount_x = balance::value(&coin_x);
         let amount_y = balance::value(&coin_y);
         let (reserve_x, reserve_y) = get_reserves_size(pool);
@@ -463,12 +462,12 @@ module defi::animeswap {
     /// burn lp
     /// require X < Y
     public fun burn<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
-        admin_data: AdminData,
+        lps: &mut LiquidityPools,
         liquidity: Balance<LPCoin<X, Y>>,
     ): (Balance<X>, Balance<Y>) {
         // feeOn
-        let fee_on = mint_fee_internal<X, Y>(pool, admin_data);
+        let fee_on = mint_fee_internal<X, Y>(lps);
+        let (pool, _) = get_pool<X, Y>(lps);
         let liquidity_amount = balance::value(&liquidity);
         let (reserve_x, reserve_y) = get_reserves_size(pool);
         let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
@@ -484,9 +483,9 @@ module defi::animeswap {
     }
 
     fun mint_fee_internal<X, Y>(
-        pool: &mut LiquidityPool<X, Y>,
-        admin_data: AdminData,
+        lps: &mut LiquidityPools,
     ): bool {
+        let (pool, admin_data) = get_pool<X, Y>(lps);
         let fee_on = admin_data.dao_fee_on;
         let k_last = pool.k_last;
         if (fee_on) {
