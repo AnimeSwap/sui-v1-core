@@ -4,6 +4,9 @@ module defi::animeswap_library {
     use std::ascii;
     use std::type_name;
 
+    /// Maximum of u128
+    const MAX_U128: u128 = 340282366920938463463374607431768211455;
+
     /// When not enough amount for pool
     const ERR_INSUFFICIENT_AMOUNT: u64 = 201;
     /// When not enough liquidity amount
@@ -63,6 +66,12 @@ module defi::animeswap_library {
 
     public fun sqrt(x: u64, y: u64): u64 {
         (math::sqrt_u128((x as u128) * (y as u128)) as u64)
+    }
+
+    // Check if mul maybe overflow
+    // The result maybe false positive
+    public fun is_overflow_mul(a: u128, b: u128): bool {
+        MAX_U128 / b <= a
     }
 
     // compare type, when use, true iff: X < Y
