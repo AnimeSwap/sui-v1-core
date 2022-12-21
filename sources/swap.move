@@ -474,8 +474,15 @@ module defi::animeswap {
         let coins_x_out = balance::split(&mut pool.coin_x_reserve, amount_x_out);
         let coins_y_out = balance::split(&mut pool.coin_y_reserve, amount_y_out);
         let (balance_x, balance_y) = get_reserves_size<X, Y>(pool);
+        // assert_k_increase
         assert_k_increase(admin_data, balance_x, balance_y, amount_x_in, amount_y_in, reserve_x, reserve_y);
-        // TODO assert_k_increase
+        // event
+        event::emit(SwapEvent<X, Y> {
+            amount_x_in,
+            amount_y_in,
+            amount_x_out,
+            amount_y_out,
+        });
         (coins_x_out, coins_y_out)
     }
 
@@ -510,6 +517,12 @@ module defi::animeswap {
         let coins = balance::increase_supply(&mut pool.lp_supply, liquidity);
         // feeOn
         if (fee_on) pool.k_last = (balance_x as u128) * (balance_y as u128);
+        // event
+        event::emit(MintEvent<X, Y> {
+            amount_x,
+            amount_y,
+            liquidity,
+        });
         coins
     }
 
@@ -533,6 +546,12 @@ module defi::animeswap {
         balance::decrease_supply(&mut pool.lp_supply, liquidity);
         // feeOn
         if (fee_on) pool.k_last = (balance_x as u128) * (balance_y as u128);
+        // event
+        event::emit(MintEvent<X, Y> {
+            amount_x,
+            amount_y,
+            liquidity: liquidity_amount,
+        });
         (x_coin_to_return, y_coin_to_return)
     }
 
