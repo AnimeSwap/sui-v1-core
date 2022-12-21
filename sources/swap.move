@@ -9,6 +9,8 @@ module defi::animeswap {
     use sui::tx_context::{Self, TxContext};
     use std::type_name;
     use std::ascii::String;
+    use std::vector;
+    use sui::event;
     use sui::dynamic_object_field as ofield;
     use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare, is_overflow_mul};
     // use std::debug;
@@ -80,6 +82,41 @@ module defi::animeswap {
     struct LiquidityPools has key {
         id: UID,
         admin_data: AdminData,
+        pair_info: PairInfo
+    }
+
+    /// events
+    struct PairMeta has drop, store, copy {
+        coin_x: String,
+        coin_y: String,
+    }
+
+    /// pair list
+    struct PairInfo has store, copy, drop {
+        pair_list: vector<PairMeta>,
+    }
+
+    struct PairCreatedEvent<phantom X, phantom Y> has drop, copy {
+        meta: PairMeta,
+    }
+
+    struct MintEvent<phantom X, phantom Y> has drop, copy {
+        amount_x: u64,
+        amount_y: u64,
+        liquidity: u64,
+    }
+
+    struct BurnEvent<phantom X, phantom Y> has drop, copy {
+        amount_x: u64,
+        amount_y: u64,
+        liquidity: u64,
+    }
+
+    struct SwapEvent<phantom X, phantom Y> has drop, copy {
+        amount_x_in: u64,
+        amount_y_in: u64,
+        amount_x_out: u64,
+        amount_y_out: u64,
     }
 
     /// To publish a new Pool one has to create a type which will mark LPCoins.
@@ -93,6 +130,9 @@ module defi::animeswap {
                 swap_fee: 30,
                 dao_fee_on: true,
                 is_pause: false,
+            },
+            pair_info: PairInfo {
+                pair_list: vector::empty(),
             }
         });
     }
@@ -205,6 +245,15 @@ module defi::animeswap {
             k_last: 0,
         };
         ofield::add(&mut lps.id, get_lp_name<X, Y>(), lp);
+        let pair_meta = PairMeta {
+            coin_x: type_name::into_string(type_name::get<X>()),
+            coin_y: type_name::into_string(type_name::get<Y>()),
+        };
+        vector::push_back(&mut lps.pair_info.pair_list, pair_meta);
+        // event
+        event::emit(PairCreatedEvent<X, Y> {
+            meta: pair_meta,
+        });
     }
 
     /// add liqudity entry function
@@ -219,6 +268,11 @@ module defi::animeswap {
         amount_y_min: u64,
         ctx: &mut TxContext,
     ) {
+        // check pair exists first
+        if (!ofield::exists_<String>(&mut lps.id, get_lp_name<X, Y>())) {
+            create_pair_entry<X, Y>(lps, ctx);
+        };
+        // add lp
         let lp_coins = add_liquidity<X, Y>(
             lps,
             coin_x_origin,
