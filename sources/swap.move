@@ -619,6 +619,62 @@ module defi::animeswap {
         };
     }
 
+    /**
+     *  Setting config functions
+     */
+    public entry fun set_dao_fee_to(
+        lps: &mut LiquidityPools,
+        dao_fee_to: address,
+        ctx: &mut TxContext,
+    ) {
+        assert!(lps.admin_data.admin_address == tx_context::sender(ctx), ERR_FORBIDDEN);
+        lps.admin_data.dao_fee_to = dao_fee_to;
+    }
+
+    public entry fun set_admin_address(
+        lps: &mut LiquidityPools,
+        admin_address: address,
+        ctx: &mut TxContext,
+    ) {
+        assert!(lps.admin_data.admin_address == tx_context::sender(ctx), ERR_FORBIDDEN);
+        lps.admin_data.admin_address = admin_address;
+    }
+
+    public entry fun set_dao_fee(
+        lps: &mut LiquidityPools,
+        dao_fee: u64,
+        ctx: &mut TxContext,
+    ) {
+        assert!(lps.admin_data.admin_address == tx_context::sender(ctx), ERR_FORBIDDEN);
+        if (dao_fee == 0) {
+            lps.admin_data.dao_fee_on = false;
+        } else {
+            lps.admin_data.dao_fee_on = true;
+            lps.admin_data.dao_fee = dao_fee;
+        };
+    }
+
+    public entry fun set_swap_fee(
+        lps: &mut LiquidityPools,
+        swap_fee: u64,
+        ctx: &mut TxContext,
+    ) {
+        assert!(lps.admin_data.admin_address == tx_context::sender(ctx), ERR_FORBIDDEN);
+        lps.admin_data.swap_fee = swap_fee;
+    }
+
+    public entry fun withdraw_dao_fee<X, Y>(
+        lps: &mut LiquidityPools,
+        ctx: &mut TxContext,
+    ) {
+        assert!(lps.admin_data.dao_fee_to == tx_context::sender(ctx), ERR_FORBIDDEN);
+        let (pool, _) = get_pool<X, Y>(lps);
+        let amount = balance::value(&pool.lp_coin_reserve) - MINIMUM_LIQUIDITY;
+        let balance_out = balance::split(&mut pool.lp_coin_reserve, amount);
+        let coins_out = coin::from_balance(balance_out, ctx);
+        transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
     #[test_only]
     public fun init_for_testing(ctx: &mut TxContext) {
         init(ctx)
