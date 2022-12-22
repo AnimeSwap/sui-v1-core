@@ -66,6 +66,7 @@ module defi::animeswap {
         last_price_x_cumulative: u128,
         last_price_y_cumulative: u128,
         k_last: u128,
+        locked: bool,
     }
 
     // global config
@@ -117,6 +118,19 @@ module defi::animeswap {
         amount_y_in: u64,
         amount_x_out: u64,
         amount_y_out: u64,
+    }
+
+    struct FlashSwapEvent<phantom X, phantom Y> has drop, copy {
+        loan_coin_x: u64,
+        loan_coin_y: u64,
+        repay_coin_x: u64,
+        repay_coin_y: u64,
+    }
+
+    /// no copy, no drop
+    struct FlashSwap<phantom X, phantom Y> {
+        loan_coin_x: u64,
+        loan_coin_y: u64
     }
 
     /// To publish a new Pool one has to create a type which will mark LPCoins.
@@ -243,6 +257,7 @@ module defi::animeswap {
             last_price_x_cumulative: 0,
             last_price_y_cumulative: 0,
             k_last: 0,
+            locked: false,
         };
         ofield::add(&mut lps.id, get_lp_name<X, Y>(), lp);
         let pair_meta = PairMeta {
@@ -463,6 +478,7 @@ module defi::animeswap {
         coins_y_in: Balance<Y>,
         amount_y_out: u64,
     ): (Balance<X>, Balance<Y>) {
+        assert_lp_unlocked<X, Y>(lps);
         let (pool, admin_data) = get_pool<X, Y>(lps);
         let amount_x_in = balance::value(&coins_x_in);
         let amount_y_in = balance::value(&coins_y_in);
@@ -493,6 +509,7 @@ module defi::animeswap {
         coin_x: Balance<X>,
         coin_y: Balance<Y>,
     ): Balance<LPCoin<X, Y>> {
+        assert_lp_unlocked<X, Y>(lps);
         // feeOn
         let fee_on = mint_fee_internal<X, Y>(lps);
         let (pool, _) = get_pool<X, Y>(lps);
@@ -532,6 +549,7 @@ module defi::animeswap {
         lps: &mut LiquidityPools,
         liquidity: Balance<LPCoin<X, Y>>,
     ): (Balance<X>, Balance<Y>) {
+        assert_lp_unlocked<X, Y>(lps);
         // feeOn
         let fee_on = mint_fee_internal<X, Y>(lps);
         let (pool, _) = get_pool<X, Y>(lps);
@@ -673,6 +691,67 @@ module defi::animeswap {
         let balance_out = balance::split(&mut pool.lp_coin_reserve, amount);
         let coins_out = coin::from_balance(balance_out, ctx);
         transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
+    fun assert_lp_unlocked<X, Y>(lps: &mut LiquidityPools) {
+        let (pool, _) = get_pool<X, Y>(lps);
+        assert!(!pool.locked, ERR_LOCK_ERROR);
+    }
+
+    public fun flash_swap<X, Y>(
+        lps: &mut LiquidityPools,
+        loan_coin_x: u64,
+        loan_coin_y: u64,
+    ): (Balance<X>, Balance<Y>, FlashSwap<X, Y>) {
+        assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
+        assert!(loan_coin_x > 0 || loan_coin_y > 0, ERR_LOAN_ERROR);
+        assert_lp_unlocked<X, Y>(lps);
+        let (pool, _) = get_pool<X, Y>(lps);
+        assert!(balance::value(&pool.coin_x_reserve) >= loan_coin_x && balance::value(&pool.coin_y_reserve) >= loan_coin_y, ERR_INSUFFICIENT_AMOUNT);
+        pool.locked = true;
+
+        let loaned_coin_x = balance::split(&mut pool.coin_x_reserve, loan_coin_x);
+        let loaned_coin_y = balance::split(&mut pool.coin_y_reserve, loan_coin_y);
+
+        // Return loaned amount.
+        (loaned_coin_x, loaned_coin_y, FlashSwap<X, Y> {loan_coin_x, loan_coin_y})
+    }
+
+    public fun pay_flash_swap<X, Y>(
+        lps: &mut LiquidityPools,
+        x_in: Balance<X>,
+        y_in: Balance<Y>,
+        flash_swap: FlashSwap<X, Y>,
+    ) {
+        assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
+
+        let FlashSwap { loan_coin_x, loan_coin_y } = flash_swap;
+        let amount_x_in = balance::value(&x_in);
+        let amount_y_in = balance::value(&y_in);
+
+        assert!(amount_x_in > 0 || amount_y_in > 0, ERR_LOAN_ERROR);
+        let (pool, admin_data) = get_pool<X, Y>(lps);
+        let reserve_x = balance::value(&pool.coin_x_reserve);
+        let reserve_y = balance::value(&pool.coin_y_reserve);
+
+        // reserve size before loan out
+        reserve_x = reserve_x + loan_coin_x;
+        reserve_y = reserve_y + loan_coin_y;
+
+        balance::join(&mut pool.coin_x_reserve, x_in);
+        balance::join(&mut pool.coin_y_reserve, y_in);
+
+        let balance_x = balance::value(&pool.coin_x_reserve);
+        let balance_y = balance::value(&pool.coin_y_reserve);
+        assert_k_increase(admin_data, balance_x, balance_y, amount_x_in, amount_y_in, reserve_x, reserve_y);
+        pool.locked = false;
+        // event
+        event::emit(FlashSwapEvent<X, Y> {
+            loan_coin_x,
+            loan_coin_y,
+            repay_coin_x: amount_x_in,
+            repay_coin_y: amount_y_in,
+        });
     }
 
     #[test_only]
