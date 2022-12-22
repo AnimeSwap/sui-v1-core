@@ -566,12 +566,20 @@ module defi::animeswap {
                 let (reserve_x, reserve_y) = get_reserves_size(pool);
                 let root_k = sqrt(reserve_x, reserve_y);
                 let root_k_last = (math::sqrt_u128(k_last) as u64);
-                let total_supply = balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply);
+                let total_supply = (balance::supply_value<LPCoin<X, Y>>(&pool.lp_supply) as u128);
                 if (root_k > root_k_last) {
                     let delta_k = ((root_k - root_k_last) as u128);
-                    // TODO overflow
-                    {
-                        let numerator = (total_supply as u128) * delta_k;
+                    // overflow
+                    if (is_overflow_mul(total_supply, delta_k)) {
+                        let numerator = (total_supply as u256) * (delta_k as u256);
+                        let denominator = (root_k as u256) * (admin_data.dao_fee as u256) + (root_k_last as u256);
+                        let liquidity = ((numerator / denominator) as u64);
+                        if (liquidity > 0) {
+                            let balance = balance::increase_supply(&mut pool.lp_supply, liquidity);
+                            balance::join(&mut pool.lp_coin_reserve, balance);
+                        };
+                    } else {
+                        let numerator = total_supply * delta_k;
                         let denominator = (root_k as u128) * (admin_data.dao_fee as u128) + (root_k_last as u128);
                         let liquidity = ((numerator / denominator) as u64);
                         if (liquidity > 0) {
