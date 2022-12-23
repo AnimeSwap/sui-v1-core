@@ -245,9 +245,9 @@ module defi::animeswap {
         (pool, lps.admin_data)
     }
 
-    /// create pair entry function
+    /// create pair function
     /// require X < Y
-    public entry fun create_pair_entry<X, Y>(
+    public fun create_pair<X, Y>(
         lps: &mut LiquidityPools,
         ctx: &mut TxContext,
     ) {
@@ -292,7 +292,7 @@ module defi::animeswap {
     ) {
         // check pair exists first
         if (!check_pair_exist<X, Y>(lps)) {
-            create_pair_entry<X, Y>(lps, ctx);
+            create_pair<X, Y>(lps, ctx);
         };
         // add lp
         let lp_coins = add_liquidity<X, Y>(
@@ -801,6 +801,14 @@ module defi::animeswap {
         });
     }
 
+    public fun get_admin_data(lps: &mut LiquidityPools): (u64, u64, bool, bool) {
+        (lps.admin_data.swap_fee, lps.admin_data.dao_fee, lps.admin_data.dao_fee_on, lps.admin_data.is_pause)
+    }
+
+    public fun get_pair_list(lps: &mut LiquidityPools): vector<PairMeta> {
+        lps.pair_info.pair_list
+    }
+
     #[test_only]
     public fun init_for_testing(ctx: &mut TxContext) {
         init(ctx)
@@ -835,7 +843,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
-            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            animeswap::create_pair<TestCoin1, TestCoin2>(&mut lps, ctx(test));
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -906,7 +914,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
-            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            animeswap::create_pair<TestCoin1, TestCoin2>(&mut lps, ctx(test));
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -971,14 +979,14 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
-            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            animeswap::create_pair<TestCoin1, TestCoin2>(&mut lps, ctx(test));
             test::return_shared(lps);
         };
         next_tx(&mut scenario, two);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
-            animeswap::create_pair_entry<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            animeswap::create_pair<TestCoin1, TestCoin2>(&mut lps, ctx(test));
             test::return_shared(lps);
         };
         test::end(scenario);
