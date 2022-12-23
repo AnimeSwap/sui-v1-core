@@ -229,6 +229,12 @@ module defi::animeswap {
         }
     }
 
+    public fun check_pair_exist<X, Y>(
+        lps: &mut LiquidityPools,
+    ): bool {
+        ofield::exists_<String>(&mut lps.id, get_lp_name<X, Y>())
+    }
+
     /// get pool
     public fun get_pool<X, Y>(
         lps: &mut LiquidityPools,
@@ -246,7 +252,8 @@ module defi::animeswap {
         ctx: &mut TxContext,
     ) {
         assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
-        assert!(!ofield::exists_<String>(&mut lps.id, get_lp_name<X, Y>()), ERR_PAIR_ALREADY_EXIST);
+        assert!(!check_pair_exist<X, Y>(lps), ERR_PAIR_ALREADY_EXIST);
+        assert_not_paused(lps);
         let lp = LiquidityPool<X, Y> {
             id: object::new(ctx),
             coin_x_reserve: balance::zero<X>(),
@@ -284,7 +291,7 @@ module defi::animeswap {
         ctx: &mut TxContext,
     ) {
         // check pair exists first
-        if (!ofield::exists_<String>(&mut lps.id, get_lp_name<X, Y>())) {
+        if (!check_pair_exist<X, Y>(lps)) {
             create_pair_entry<X, Y>(lps, ctx);
         };
         // add lp
@@ -479,6 +486,7 @@ module defi::animeswap {
         amount_y_out: u64,
     ): (Balance<X>, Balance<Y>) {
         assert_lp_unlocked<X, Y>(lps);
+        assert_not_paused(lps);
         let (pool, admin_data) = get_pool<X, Y>(lps);
         let amount_x_in = balance::value(&coins_x_in);
         let amount_y_in = balance::value(&coins_y_in);
@@ -510,6 +518,7 @@ module defi::animeswap {
         coin_y: Balance<Y>,
     ): Balance<LPCoin<X, Y>> {
         assert_lp_unlocked<X, Y>(lps);
+        assert_not_paused(lps);
         // feeOn
         let fee_on = mint_fee_internal<X, Y>(lps);
         let (pool, _) = get_pool<X, Y>(lps);
@@ -550,6 +559,7 @@ module defi::animeswap {
         liquidity: Balance<LPCoin<X, Y>>,
     ): (Balance<X>, Balance<Y>) {
         assert_lp_unlocked<X, Y>(lps);
+        assert_not_paused(lps);
         // feeOn
         let fee_on = mint_fee_internal<X, Y>(lps);
         let (pool, _) = get_pool<X, Y>(lps);
@@ -693,7 +703,42 @@ module defi::animeswap {
         transfer::transfer(coins_out, tx_context::sender(ctx));
     }
 
+    /// pause swap, only remove lp is allowed
+    /// EMERGENCY ONLY
+    public entry fun pause(
+        lps: &mut LiquidityPools,
+        ctx: &mut TxContext,
+    ) {
+        assert_not_paused(lps);
+        assert!(lps.admin_data.admin_address == tx_context::sender(ctx), ERR_FORBIDDEN);
+        lps.admin_data.is_pause = true;
+    }
+
+    /// unpause swap
+    /// EMERGENCY ONLY
+    public entry fun unpause(
+        lps: &mut LiquidityPools,
+        ctx: &mut TxContext,
+    ) {
+        assert_paused(lps);
+        assert!(lps.admin_data.admin_address == tx_context::sender(ctx), ERR_FORBIDDEN);
+        lps.admin_data.is_pause = false;
+    }
+
+    fun assert_paused(
+        lps: &mut LiquidityPools,
+    ) {
+        assert!(lps.admin_data.is_pause, ERR_PAUSABLE_ERROR);
+    }
+
+    fun assert_not_paused(
+        lps: &mut LiquidityPools,
+    ) {
+        assert!(!lps.admin_data.is_pause, ERR_PAUSABLE_ERROR);
+    }
+
     fun assert_lp_unlocked<X, Y>(lps: &mut LiquidityPools) {
+        assert!(check_pair_exist<X, Y>(lps), ERR_PAIR_NOT_EXIST);
         let (pool, _) = get_pool<X, Y>(lps);
         assert!(!pool.locked, ERR_LOCK_ERROR);
     }
@@ -706,6 +751,7 @@ module defi::animeswap {
         assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
         assert!(loan_coin_x > 0 || loan_coin_y > 0, ERR_LOAN_ERROR);
         assert_lp_unlocked<X, Y>(lps);
+        assert_not_paused(lps);
         let (pool, _) = get_pool<X, Y>(lps);
         assert!(balance::value(&pool.coin_x_reserve) >= loan_coin_x && balance::value(&pool.coin_y_reserve) >= loan_coin_y, ERR_INSUFFICIENT_AMOUNT);
         pool.locked = true;
@@ -724,6 +770,7 @@ module defi::animeswap {
         flash_swap: FlashSwap<X, Y>,
     ) {
         assert!(compare<X, Y>(), ERR_PAIR_ORDER_ERROR);
+        assert_not_paused(lps);
 
         let FlashSwap { loan_coin_x, loan_coin_y } = flash_swap;
         let amount_x_in = balance::value(&x_in);
