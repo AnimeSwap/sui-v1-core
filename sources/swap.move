@@ -12,6 +12,7 @@ module defi::animeswap {
     use std::vector;
     use sui::event;
     use sui::dynamic_object_field as ofield;
+    use sui::pay;
     use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare, is_overflow_mul};
     // use std::debug;
 
@@ -280,6 +281,32 @@ module defi::animeswap {
 
     /// add liqudity entry function
     /// require X < Y
+    public entry fun add_liquidity_batch_entry<X, Y>(
+        lps: &mut LiquidityPools,
+        coin_x_origin: vector<Coin<X>>,
+        coin_y_origin: vector<Coin<Y>>,
+        amount_x_desired: u64,
+        amount_y_desired: u64,
+        amount_x_min: u64,
+        amount_y_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let merged_coin_x_in = vector::pop_back(&mut coin_x_origin);
+        pay::join_vec(&mut merged_coin_x_in, coin_x_origin);
+        let merged_coin_y_in = vector::pop_back(&mut coin_y_origin);
+        pay::join_vec(&mut merged_coin_y_in, coin_y_origin);
+        add_liquidity_entry<X, Y>(
+            lps,
+            merged_coin_x_in,
+            merged_coin_y_in,
+            amount_x_desired,
+            amount_y_desired,
+            amount_x_min,
+            amount_y_min,
+            ctx
+        );
+    }
+
     public entry fun add_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
         coin_x_origin: Coin<X>,
@@ -310,6 +337,26 @@ module defi::animeswap {
 
     /// remove liqudity entry function
     /// require X < Y
+    public entry fun remove_liquidity_batch_entry<X, Y>(
+        lps: &mut LiquidityPools,
+        liquidity: vector<Coin<LPCoin<X, Y>>>,
+        liquidity_desired: u64,
+        amount_x_min: u64,
+        amount_y_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let merged_liquidity_in = vector::pop_back(&mut liquidity);
+        pay::join_vec(&mut merged_liquidity_in, liquidity);
+        remove_liquidity_entry<X, Y>(
+            lps,
+            merged_liquidity_in,
+            liquidity_desired,
+            amount_x_min,
+            amount_y_min,
+            ctx
+        );
+    }
+
     public entry fun remove_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
         liquidity: Coin<LPCoin<X, Y>>,
@@ -389,7 +436,25 @@ module defi::animeswap {
 
     /// entry, swap from exact X to Y
     /// no require for X Y order
-    public entry fun swap_exact_coins_for_coins<X, Y>(
+    public entry fun swap_exact_coins_for_coins_batch_entry<X, Y>(
+        lps: &mut LiquidityPools,
+        coins_in_origin: vector<Coin<X>>,
+        amount_in: u64,
+        amount_out_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
+        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
+        swap_exact_coins_for_coins_entry<X, Y>(
+            lps,
+            merged_coins_in_origin,
+            amount_in,
+            amount_out_min,
+            ctx
+        );
+    }
+
+    public entry fun swap_exact_coins_for_coins_entry<X, Y>(
         lps: &mut LiquidityPools,
         coins_in_origin: Coin<X>,
         amount_in: u64,
@@ -415,7 +480,25 @@ module defi::animeswap {
 
     /// entry, swap from X to exact Y
     /// no require for X Y order
-    public entry fun swap_coins_for_exact_coins<X, Y>(
+    public entry fun swap_coins_for_exact_coins_batch_entry<X, Y>(
+        lps: &mut LiquidityPools,
+        coins_in_origin: vector<Coin<X>>,
+        amount_out: u64,
+        amount_in_max: u64,
+        ctx: &mut TxContext,
+    ) {
+        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
+        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
+        swap_coins_for_exact_coins_entry<X, Y>(
+            lps,
+            merged_coins_in_origin,
+            amount_out,
+            amount_in_max,
+            ctx
+        );
+    }
+
+    public entry fun swap_coins_for_exact_coins_entry<X, Y>(
         lps: &mut LiquidityPools,
         coins_in_origin: Coin<X>,
         amount_out: u64,
