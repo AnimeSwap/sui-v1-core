@@ -183,13 +183,15 @@ module defi::animeswap {
         amount_out: u64,
         x_y: bool,
     ): u64 {
-        let (pool, admin_data) = get_pool<X, Y>(lps);
-        let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
-        if (!x_y) {
-            (reserve_in, reserve_out) = (reserve_out, reserve_in);
-        };
-        let amount_in = get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee);
-        amount_in
+        if (x_y) {
+            let (pool, admin_data) = get_pool<X, Y>(lps);
+            let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+            get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee)
+        } else {
+            let (pool, admin_data) = get_pool<Y, X>(lps);
+            let (reserve_out, reserve_in) = get_reserves_size<Y, X>(pool);
+            get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee)
+        }
     }
 
     /// get amounts in, 2 pairs
@@ -201,20 +203,26 @@ module defi::animeswap {
     ): u64 {
         let (amount_mid, amount_in);
         {
-            let (pool, admin_data) = get_pool<Y, Z>(lps);
-            let (reserve_in, reserve_out) = get_reserves_size<Y, Z>(pool);
-            if (!y_z) {
-                (reserve_in, reserve_out) = (reserve_out, reserve_in);
+            if (y_z) {
+                let (pool, admin_data) = get_pool<Y, Z>(lps);
+                let (reserve_in, reserve_out) = get_reserves_size<Y, Z>(pool);
+                amount_mid = get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee);
+            } else {
+                let (pool, admin_data) = get_pool<Z, Y>(lps);
+                let (reserve_out, reserve_in) = get_reserves_size<Z, Y>(pool);
+                amount_mid = get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee);
             };
-            amount_mid = get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee);
         };
         {
-            let (pool, admin_data) = get_pool<X, Y>(lps);
-            let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
-            if (!x_y) {
-                (reserve_in, reserve_out) = (reserve_out, reserve_in);
+            if (x_y) {
+                let (pool, admin_data) = get_pool<X, Y>(lps);
+                let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+                amount_in = get_amount_in(amount_mid, reserve_in, reserve_out, admin_data.swap_fee);
+            } else {
+                let (pool, admin_data) = get_pool<Y, X>(lps);
+                let (reserve_out, reserve_in) = get_reserves_size<Y, X>(pool);
+                amount_in = get_amount_in(amount_mid, reserve_in, reserve_out, admin_data.swap_fee);
             };
-            amount_in = get_amount_in(amount_mid, reserve_in, reserve_out, admin_data.swap_fee);
         };
         amount_in
     }
@@ -591,7 +599,7 @@ module defi::animeswap {
             return_remaining_coin(coins_in_origin, ctx);
             transfer::transfer(coins_out, tx_context::sender(ctx));
         } else {
-            let amount_in = get_amounts_in<Y, X>(lps, amount_out, false);
+            let amount_in = get_amounts_in<X, Y>(lps, amount_out, false);
             assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
             let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
@@ -1029,7 +1037,6 @@ module defi::animeswap {
 #[test_only]
 module defi::animeswap_tests {
     use sui::coin::{mint_for_testing as mint, destroy_for_testing as burn};
-    // use sui::balance::{Self};
     use sui::coin::{Self, Coin};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
     use defi::animeswap::{Self, LiquidityPools, LPCoin};
@@ -1178,7 +1185,7 @@ module defi::animeswap_tests {
     }
 
     #[test]
-    fun test_swap_lp_multiple_1() {
+    fun test_swap_lp_multiple_exact_x_y_z() {
         let scenario = scenario();
         let (owner, one, _) = people();
         next_tx(&mut scenario, owner);
@@ -1200,15 +1207,15 @@ module defi::animeswap_tests {
             let lps = test::take_shared<LiquidityPools>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
-                mint<TestCoin1>(10000, ctx(test)),
-                mint<TestCoin2>(40000, ctx(test)),
-                10000,
-                40000,
+                mint<TestCoin1>(1000000, ctx(test)),
+                mint<TestCoin2>(4000000, ctx(test)),
+                1000000,
+                4000000,
                 1,
                 1,
                 ctx(test),
             );
-            assert!(burn(lp_coins) == 19000, TEST_ERROR);
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1217,15 +1224,15 @@ module defi::animeswap_tests {
             let lps = test::take_shared<LiquidityPools>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
                 &mut lps,
-                mint<TestCoin2>(10000, ctx(test)),
-                mint<TestCoin3>(40000, ctx(test)),
-                10000,
-                40000,
+                mint<TestCoin2>(1000000, ctx(test)),
+                mint<TestCoin3>(4000000, ctx(test)),
+                1000000,
+                4000000,
                 1,
                 1,
                 ctx(test),
             );
-            assert!(burn(lp_coins) == 19000, TEST_ERROR);
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1243,16 +1250,17 @@ module defi::animeswap_tests {
         };
         next_tx(&mut scenario, one);
         {
+            // 1000 TestCoins1 -> 15825 TestCoins3
             let test = &mut scenario;
             let coins = test::take_from_sender<Coin<TestCoin3>>(test);
-            assert!(coin::value(&coins) == 10620, TEST_ERROR);
+            assert!(coin::value(&coins) == 15825, TEST_ERROR);
             test::return_to_sender(test, coins);
         };
         test::end(scenario);
     }
 
     #[test]
-    fun test_swap_lp_multiple_2() {
+    fun test_swap_lp_multiple_x_y_z_exact() {
         let scenario = scenario();
         let (owner, one, _) = people();
         next_tx(&mut scenario, owner);
@@ -1274,15 +1282,15 @@ module defi::animeswap_tests {
             let lps = test::take_shared<LiquidityPools>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
-                mint<TestCoin1>(10000, ctx(test)),
-                mint<TestCoin2>(40000, ctx(test)),
-                10000,
-                40000,
+                mint<TestCoin1>(1000000, ctx(test)),
+                mint<TestCoin2>(4000000, ctx(test)),
+                1000000,
+                4000000,
                 1,
                 1,
                 ctx(test),
             );
-            assert!(burn(lp_coins) == 19000, TEST_ERROR);
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1291,15 +1299,15 @@ module defi::animeswap_tests {
             let lps = test::take_shared<LiquidityPools>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
                 &mut lps,
-                mint<TestCoin2>(10000, ctx(test)),
-                mint<TestCoin3>(40000, ctx(test)),
-                10000,
-                40000,
+                mint<TestCoin2>(1000000, ctx(test)),
+                mint<TestCoin3>(4000000, ctx(test)),
+                1000000,
+                4000000,
                 1,
                 1,
                 ctx(test),
             );
-            assert!(burn(lp_coins) == 19000, TEST_ERROR);
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1308,19 +1316,172 @@ module defi::animeswap_tests {
             let lps = test::take_shared<LiquidityPools>(test);
             animeswap::swap_coins_for_exact_coins_2_pair_entry<TestCoin1, TestCoin2, TestCoin3>(
                 &mut lps,
-                mint<TestCoin1>(10000, ctx(test)),
-                10620,
-                1000,
+                mint<TestCoin1>(20000, ctx(test)),
+                15825,
+                10000000000,
                 ctx(test),
             );
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
+            // 1000 TestCoins1 -> 15825 TestCoins3
             let test = &mut scenario;
             let coins = test::take_from_sender<Coin<TestCoin1>>(test);
             // remain value
-            assert!(coin::value(&coins) == 10000 - 1000, TEST_ERROR);
+            assert!(coin::value(&coins) == 20000 - 1000, TEST_ERROR);
+            test::return_to_sender(test, coins);
+        };
+        test::end(scenario);
+    }
+
+    #[test]
+    fun test_swap_lp_multiple_exact_z_y_x() {
+        let scenario = scenario();
+        let (owner, one, _) = people();
+        next_tx(&mut scenario, owner);
+        {
+            let test = &mut scenario;
+            animeswap::init_for_testing(ctx(test));
+        };
+        next_tx(&mut scenario, owner);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::create_pair<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            animeswap::create_pair<TestCoin2, TestCoin3>(&mut lps, ctx(test));
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
+                &mut lps,
+                mint<TestCoin1>(1000000, ctx(test)),
+                mint<TestCoin2>(4000000, ctx(test)),
+                1000000,
+                4000000,
+                1,
+                1,
+                ctx(test),
+            );
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
+                &mut lps,
+                mint<TestCoin2>(1000000, ctx(test)),
+                mint<TestCoin3>(4000000, ctx(test)),
+                1000000,
+                4000000,
+                1,
+                1,
+                ctx(test),
+            );
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::swap_exact_coins_for_coins_2_pair_entry<TestCoin3, TestCoin2, TestCoin1>(
+                &mut lps,
+                mint<TestCoin3>(100000, ctx(test)),
+                99984,
+                1,
+                ctx(test),
+            );
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            // 99984 TestCoin3 -> 6024 TestCoin1
+            // also: 100000 TestCoin3 -> 6024 TestCoin1
+            let test = &mut scenario;
+            let coins = test::take_from_sender<Coin<TestCoin1>>(test);
+            assert!(coin::value(&coins) == 6024, TEST_ERROR);
+            test::return_to_sender(test, coins);
+        };
+        test::end(scenario);
+    }
+
+    #[test]
+    fun test_swap_lp_multiple_z_y_x_exact() {
+        let scenario = scenario();
+        let (owner, one, _) = people();
+        next_tx(&mut scenario, owner);
+        {
+            let test = &mut scenario;
+            animeswap::init_for_testing(ctx(test));
+        };
+        next_tx(&mut scenario, owner);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::create_pair<TestCoin1, TestCoin2>(&mut lps, ctx(test));
+            animeswap::create_pair<TestCoin2, TestCoin3>(&mut lps, ctx(test));
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
+                &mut lps,
+                mint<TestCoin1>(1000000, ctx(test)),
+                mint<TestCoin2>(4000000, ctx(test)),
+                1000000,
+                4000000,
+                1,
+                1,
+                ctx(test),
+            );
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
+                &mut lps,
+                mint<TestCoin2>(1000000, ctx(test)),
+                mint<TestCoin3>(4000000, ctx(test)),
+                1000000,
+                4000000,
+                1,
+                1,
+                ctx(test),
+            );
+            assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            let test = &mut scenario;
+            let lps = test::take_shared<LiquidityPools>(test);
+            animeswap::swap_coins_for_exact_coins_2_pair_entry<TestCoin3, TestCoin2, TestCoin1>(
+                &mut lps,
+                mint<TestCoin3>(200000, ctx(test)),
+                6024,
+                1000000,
+                ctx(test),
+            );
+            test::return_shared(lps);
+        };
+        next_tx(&mut scenario, one);
+        {
+            // 99984 TestCoin3 -> 6024 TestCoin1
+            let test = &mut scenario;
+            let coins = test::take_from_sender<Coin<TestCoin3>>(test);
+            // remain value
+            assert!(coin::value(&coins) == 200000 - 99984, TEST_ERROR);
             test::return_to_sender(test, coins);
         };
         test::end(scenario);
