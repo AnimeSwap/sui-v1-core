@@ -192,6 +192,32 @@ module defi::animeswap {
         amount_in
     }
 
+    public fun get_amounts_in_2_pair<X, Y, Z> (
+        lps: &mut LiquidityPools,
+        amount_out: u64,
+        x_y: bool,
+        y_z: bool,
+    ): u64 {
+        let (amount_mid, amount_in);
+        {
+            let (pool, admin_data) = get_pool<Y, Z>(lps);
+            let (reserve_in, reserve_out) = get_reserves_size<Y, Z>(pool);
+            if (!y_z) {
+                (reserve_in, reserve_out) = (reserve_out, reserve_in);
+            };
+            amount_mid = get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee);
+        };
+        {
+            let (pool, admin_data) = get_pool<X, Y>(lps);
+            let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+            if (!x_y) {
+                (reserve_in, reserve_out) = (reserve_out, reserve_in);
+            };
+            amount_in = get_amount_in(amount_mid, reserve_in, reserve_out, admin_data.swap_fee);
+        };
+        amount_in
+    }
+
     /// return remaining coin.
     public fun return_remaining_coin<X>(
         coin: Coin<X>,
@@ -478,6 +504,56 @@ module defi::animeswap {
         }
     }
 
+    /// entry, swap from exact X to Y to Z
+    public entry fun swap_exact_coins_for_coins_2_pair_batch_entry<X, Y, Z>(
+        lps: &mut LiquidityPools,
+        coins_in_origin: vector<Coin<X>>,
+        amount_in: u64,
+        amount_out_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
+        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
+        swap_exact_coins_for_coins_2_pair_entry<X, Y, Z>(
+            lps,
+            merged_coins_in_origin,
+            amount_in,
+            amount_out_min,
+            ctx
+        );
+    }
+
+    public entry fun swap_exact_coins_for_coins_2_pair_entry<X, Y, Z>(
+        lps: &mut LiquidityPools,
+        coins_in_origin: Coin<X>,
+        amount_in: u64,
+        amount_out_min: u64,
+        ctx: &mut TxContext,
+    ) {
+        let (zeroX, zeroY, coins_mid, coins_out);
+        if (compare<X, Y>()) {
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
+            coin::destroy_zero(zeroX);
+            return_remaining_coin(coins_in_origin, ctx);
+        } else {
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            (coins_mid, zeroX) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
+            coin::destroy_zero(zeroX);
+            return_remaining_coin(coins_in_origin, ctx);
+        };
+        if (compare<Y, Z>()) {
+            (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, coins_mid, coin::zero(ctx), ctx);
+            coin::destroy_zero(zeroY);
+            assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+        } else {
+            (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, coin::zero(ctx), coins_mid, ctx);
+            coin::destroy_zero(zeroY);
+            assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
+        };
+        transfer::transfer(coins_out, tx_context::sender(ctx));
+    }
+
     /// entry, swap from X to exact Y
     /// no require for X Y order
     public entry fun swap_coins_for_exact_coins_batch_entry<X, Y>(
@@ -522,6 +598,57 @@ module defi::animeswap {
             return_remaining_coin(coins_in_origin, ctx);
             transfer::transfer(coins_out, tx_context::sender(ctx));
         }
+    }
+
+    public entry fun swap_coins_for_exact_coins_2_pair_batch_entry<X, Y, Z>(
+        lps: &mut LiquidityPools,
+        coins_in_origin: vector<Coin<X>>,
+        amount_out: u64,
+        amount_in_max: u64,
+        ctx: &mut TxContext,
+    ) {
+        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
+        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
+        swap_coins_for_exact_coins_2_pair_entry<X, Y, Z>(
+            lps,
+            merged_coins_in_origin,
+            amount_out,
+            amount_in_max,
+            ctx
+        );
+    }
+
+    public entry fun swap_coins_for_exact_coins_2_pair_entry<X, Y, Z>(
+        lps: &mut LiquidityPools,
+        coins_in_origin: Coin<X>,
+        amount_out: u64,
+        amount_in_max: u64,
+        ctx: &mut TxContext,
+    ) {
+        let x_y = compare<X, Y>();
+        let y_z = compare<Y, Z>();
+        let amount_in = get_amounts_in_2_pair<X, Y, Z>(lps, amount_out, x_y, y_z);
+        assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
+        let (zeroX, zeroY, coins_mid, coins_out);
+        if (x_y) {
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
+            coin::destroy_zero(zeroX);
+            return_remaining_coin(coins_in_origin, ctx);
+        } else {
+            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
+            (coins_mid, zeroX) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
+            coin::destroy_zero(zeroX);
+            return_remaining_coin(coins_in_origin, ctx);
+        };
+        if (y_z) {
+            (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, coins_mid, coin::zero(ctx), ctx);
+            coin::destroy_zero(zeroY);
+        } else {
+            (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, coin::zero(ctx), coins_mid, ctx);
+            coin::destroy_zero(zeroY);
+        };
+        transfer::transfer(coins_out, tx_context::sender(ctx));
     }
 
     /// swap from Coin to Coin, both sides
