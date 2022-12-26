@@ -163,27 +163,29 @@ module defi::animeswap {
     }
 
     /// get amounts out, 1 pair
+    /// X in and Y out
     public fun get_amounts_out<X, Y>(
         lps: &mut LiquidityPools,
         amount_in: u64,
-        x_y: bool,
     ): u64 {
-        let (pool, admin_data) = get_pool<X, Y>(lps);
-        let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
-        if (!x_y) {
-            (reserve_in, reserve_out) = (reserve_out, reserve_in);
-        };
-        let amount_out = get_amount_out(amount_in, reserve_in, reserve_out, admin_data.swap_fee);
-        amount_out
+        if (compare<X, Y>()) {
+            let (pool, admin_data) = get_pool<X, Y>(lps);
+            let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
+            get_amount_out(amount_in, reserve_in, reserve_out, admin_data.swap_fee)
+        } else {
+            let (pool, admin_data) = get_pool<Y, X>(lps);
+            let (reserve_out, reserve_in) = get_reserves_size<Y, X>(pool);
+            get_amount_out(amount_in, reserve_in, reserve_out, admin_data.swap_fee)
+        }
     }
 
     /// get amounts in, 1 pair
+    /// X in and Y out
     public fun get_amounts_in<X, Y>(
         lps: &mut LiquidityPools,
         amount_out: u64,
-        x_y: bool,
     ): u64 {
-        if (x_y) {
+        if (compare<X, Y>()) {
             let (pool, admin_data) = get_pool<X, Y>(lps);
             let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
             get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee)
@@ -195,15 +197,14 @@ module defi::animeswap {
     }
 
     /// get amounts in, 2 pairs
+    /// X in and Z out
     public fun get_amounts_in_2_pair<X, Y, Z> (
         lps: &mut LiquidityPools,
         amount_out: u64,
-        x_y: bool,
-        y_z: bool,
     ): u64 {
         let (amount_mid, amount_in);
         {
-            if (y_z) {
+            if (compare<Y, Z>()) {
                 let (pool, admin_data) = get_pool<Y, Z>(lps);
                 let (reserve_in, reserve_out) = get_reserves_size<Y, Z>(pool);
                 amount_mid = get_amount_in(amount_out, reserve_in, reserve_out, admin_data.swap_fee);
@@ -214,7 +215,7 @@ module defi::animeswap {
             };
         };
         {
-            if (x_y) {
+            if (compare<X, Y>()) {
                 let (pool, admin_data) = get_pool<X, Y>(lps);
                 let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
                 amount_in = get_amount_in(amount_mid, reserve_in, reserve_out, admin_data.swap_fee);
@@ -590,18 +591,15 @@ module defi::animeswap {
         amount_in_max: u64,
         ctx: &mut TxContext,
     ) {
+        let amount_in = get_amounts_in<X, Y>(lps, amount_out);
+        assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
+        let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
         if (compare<X, Y>()) {
-            let amount_in = get_amounts_in<X, Y>(lps, amount_out, true);
-            assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
-            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
             let (zero, coins_out) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zero);
             return_remaining_coin(coins_in_origin, ctx);
             transfer::transfer(coins_out, tx_context::sender(ctx));
         } else {
-            let amount_in = get_amounts_in<X, Y>(lps, amount_out, false);
-            assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
-            let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
             let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zero);
             return_remaining_coin(coins_in_origin, ctx);
@@ -634,12 +632,10 @@ module defi::animeswap {
         amount_in_max: u64,
         ctx: &mut TxContext,
     ) {
-        let x_y = compare<X, Y>();
-        let y_z = compare<Y, Z>();
-        let amount_in = get_amounts_in_2_pair<X, Y, Z>(lps, amount_out, x_y, y_z);
+        let amount_in = get_amounts_in_2_pair<X, Y, Z>(lps, amount_out);
         assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
         let (zeroX, zeroY, coins_mid, coins_out);
-        if (x_y) {
+        if (compare<X, Y>()) {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
             (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zeroX);
@@ -650,7 +646,7 @@ module defi::animeswap {
             coin::destroy_zero(zeroX);
             return_remaining_coin(coins_in_origin, ctx);
         };
-        if (y_z) {
+        if (compare<Y, Z>()) {
             (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, coins_mid, coin::zero(ctx), ctx);
             coin::destroy_zero(zeroY);
         } else {
