@@ -3,8 +3,8 @@ name = "animeswap"
 version = "0.0.2"
 
 [dependencies]
-#Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "devnet" }
-Sui = { local = "/home/zzzkky/Desktop/project/sui/crates/sui-framework/packages/sui-framework" }
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "devnet" }
+#Sui = { local = "/home/zzzkky/Desktop/project/sui/crates/sui-framework/packages/sui-framework" }
 
 [addresses]
 defi = "0x0"
