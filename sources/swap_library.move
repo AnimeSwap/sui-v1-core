@@ -68,6 +68,19 @@ module defi::animeswap_library {
         (math::sqrt_u128((x as u128) * (y as u128)) as u64)
     }
 
+    /// Add but allow overflow
+    public fun overflow_add(a: u128, b: u128): u128 {
+        let r = MAX_U128 - b;
+        if (r < a) {
+            return a - r - 1
+        };
+        r = MAX_U128 - a;
+        if (r < b) {
+            return b - r - 1
+        };
+        a + b
+    }
+
     // Check if mul maybe overflow
     // The result maybe false positive
     public fun is_overflow_mul(a: u128, b: u128): bool {

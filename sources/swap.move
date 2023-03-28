@@ -13,7 +13,9 @@ module defi::animeswap {
     use sui::event;
     use sui::dynamic_object_field as ofield;
     use sui::pay;
-    use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare, is_overflow_mul};
+    use sui::clock::{Self, Clock};
+    use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare, is_overflow_mul, overflow_add};
+    use defi::uq64x64;
     // use std::debug;
 
     /// When contract error
@@ -119,6 +121,13 @@ module defi::animeswap {
         amount_y_in: u64,
         amount_x_out: u64,
         amount_y_out: u64,
+    }
+
+    struct SyncEvent<phantom X, phantom Y> has drop, copy {
+        reserve_x: u64,
+        reserve_y: u64,
+        last_price_x_cumulative: u128,
+        last_price_y_cumulative: u128,
     }
 
     struct FlashSwapEvent<phantom X, phantom Y> has drop, copy {
@@ -319,6 +328,7 @@ module defi::animeswap {
     /// require X < Y
     public entry fun add_liquidity_batch_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coin_x_origin: vector<Coin<X>>,
         coin_y_origin: vector<Coin<Y>>,
         amount_x_desired: u64,
@@ -333,6 +343,7 @@ module defi::animeswap {
         pay::join_vec(&mut merged_coin_y_in, coin_y_origin);
         add_liquidity_entry<X, Y>(
             lps,
+            clock,
             merged_coin_x_in,
             merged_coin_y_in,
             amount_x_desired,
@@ -345,6 +356,7 @@ module defi::animeswap {
 
     public entry fun add_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coin_x_origin: Coin<X>,
         coin_y_origin: Coin<Y>,
         amount_x_desired: u64,
@@ -360,6 +372,7 @@ module defi::animeswap {
         // add lp
         let lp_coins = add_liquidity<X, Y>(
             lps,
+            clock,
             coin_x_origin,
             coin_y_origin,
             amount_x_desired,
@@ -375,6 +388,7 @@ module defi::animeswap {
     /// require X < Y
     public entry fun remove_liquidity_batch_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         liquidity: vector<Coin<LPCoin<X, Y>>>,
         liquidity_desired: u64,
         amount_x_min: u64,
@@ -385,6 +399,7 @@ module defi::animeswap {
         pay::join_vec(&mut merged_liquidity_in, liquidity);
         remove_liquidity_entry<X, Y>(
             lps,
+            clock,
             merged_liquidity_in,
             liquidity_desired,
             amount_x_min,
@@ -395,6 +410,7 @@ module defi::animeswap {
 
     public entry fun remove_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         liquidity: Coin<LPCoin<X, Y>>,
         liquidity_desired: u64,
         amount_x_min: u64,
@@ -403,6 +419,7 @@ module defi::animeswap {
     ) {
         let (coin_x, coin_y) = remove_liquidity<X, Y>(
             lps,
+            clock,
             liquidity,
             liquidity_desired,
             amount_x_min,
@@ -417,6 +434,7 @@ module defi::animeswap {
     /// require X < Y
     public fun add_liquidity<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coin_x_origin: Coin<X>,
         coin_y_origin: Coin<Y>,
         amount_x_desired: u64,
@@ -441,7 +459,7 @@ module defi::animeswap {
             calc_optimal_coin_values<X, Y>(lps, amount_x_desired, amount_y_desired, amount_x_min, amount_y_min);
         let coin_x = coin::split(&mut coin_x_origin, amount_x, ctx);
         let coin_y = coin::split(&mut coin_y_origin, amount_y, ctx);
-        let lp_balance = mint<X, Y>(lps, coin::into_balance<X>(coin_x), coin::into_balance<Y>(coin_y));
+        let lp_balance = mint<X, Y>(lps, clock, coin::into_balance<X>(coin_x), coin::into_balance<Y>(coin_y));
         let lp_coins = coin::from_balance<LPCoin<X, Y>>(lp_balance, ctx);
         return_remaining_coin(coin_x_origin, ctx);
         return_remaining_coin(coin_y_origin, ctx);
@@ -452,6 +470,7 @@ module defi::animeswap {
     /// require X < Y
     public fun remove_liquidity<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         liquidity: Coin<LPCoin<X, Y>>,
         liquidity_desired: u64,
         amount_x_min: u64,
@@ -461,7 +480,7 @@ module defi::animeswap {
         let amt_lp = coin::value(&liquidity);
         assert!(amt_lp >= liquidity_desired, ERR_INSUFFICIENT_INPUT_AMOUNT);
         let coin_lp = coin::split(&mut liquidity, liquidity_desired, ctx);
-        let (x_balance, y_balance) = burn<X, Y>(lps, coin::into_balance(coin_lp));
+        let (x_balance, y_balance) = burn<X, Y>(lps, clock, coin::into_balance(coin_lp));
         let x_out = coin::from_balance(x_balance, ctx);
         let y_out = coin::from_balance(y_balance, ctx);
         assert!(coin::value(&x_out) >= amount_x_min, ERR_INSUFFICIENT_X_AMOUNT);
@@ -474,6 +493,7 @@ module defi::animeswap {
     /// no require for X Y order
     public entry fun swap_exact_coins_for_coins_batch_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: vector<Coin<X>>,
         amount_in: u64,
         amount_out_min: u64,
@@ -483,6 +503,7 @@ module defi::animeswap {
         pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
         swap_exact_coins_for_coins_entry<X, Y>(
             lps,
+            clock,
             merged_coins_in_origin,
             amount_in,
             amount_out_min,
@@ -492,6 +513,7 @@ module defi::animeswap {
 
     public entry fun swap_exact_coins_for_coins_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: Coin<X>,
         amount_in: u64,
         amount_out_min: u64,
@@ -499,14 +521,14 @@ module defi::animeswap {
     ) {
         if (compare<X, Y>()) {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-            let (zero, coins_out) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
+            let (zero, coins_out) = swap_coins_for_coins<X, Y>(lps, clock, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zero);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
             return_remaining_coin(coins_in_origin, ctx);
             transfer::public_transfer(coins_out, tx_context::sender(ctx));
         } else {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-            let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
+            let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, clock, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zero);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
             return_remaining_coin(coins_in_origin, ctx);
@@ -517,6 +539,7 @@ module defi::animeswap {
     /// entry, swap from exact X to Y to Z
     public entry fun swap_exact_coins_for_coins_2_pair_batch_entry<X, Y, Z>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: vector<Coin<X>>,
         amount_in: u64,
         amount_out_min: u64,
@@ -526,6 +549,7 @@ module defi::animeswap {
         pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
         swap_exact_coins_for_coins_2_pair_entry<X, Y, Z>(
             lps,
+            clock,
             merged_coins_in_origin,
             amount_in,
             amount_out_min,
@@ -535,6 +559,7 @@ module defi::animeswap {
 
     public entry fun swap_exact_coins_for_coins_2_pair_entry<X, Y, Z>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: Coin<X>,
         amount_in: u64,
         amount_out_min: u64,
@@ -543,21 +568,21 @@ module defi::animeswap {
         let (zeroX, zeroY, coins_mid, coins_out);
         if (compare<X, Y>()) {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-            (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
+            (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, clock, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zeroX);
             return_remaining_coin(coins_in_origin, ctx);
         } else {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-            (coins_mid, zeroX) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
+            (coins_mid, zeroX) = swap_coins_for_coins<Y, X>(lps, clock, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zeroX);
             return_remaining_coin(coins_in_origin, ctx);
         };
         if (compare<Y, Z>()) {
-            (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, coins_mid, coin::zero(ctx), ctx);
+            (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, clock, coins_mid, coin::zero(ctx), ctx);
             coin::destroy_zero(zeroY);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
         } else {
-            (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, coin::zero(ctx), coins_mid, ctx);
+            (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, clock, coin::zero(ctx), coins_mid, ctx);
             coin::destroy_zero(zeroY);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
         };
@@ -568,6 +593,7 @@ module defi::animeswap {
     /// no require for X Y order
     public entry fun swap_coins_for_exact_coins_batch_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: vector<Coin<X>>,
         amount_out: u64,
         amount_in_max: u64,
@@ -577,6 +603,7 @@ module defi::animeswap {
         pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
         swap_coins_for_exact_coins_entry<X, Y>(
             lps,
+            clock,
             merged_coins_in_origin,
             amount_out,
             amount_in_max,
@@ -586,6 +613,7 @@ module defi::animeswap {
 
     public entry fun swap_coins_for_exact_coins_entry<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: Coin<X>,
         amount_out: u64,
         amount_in_max: u64,
@@ -595,12 +623,12 @@ module defi::animeswap {
         assert!(amount_in <= amount_in_max, ERR_INSUFFICIENT_INPUT_AMOUNT);
         let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
         if (compare<X, Y>()) {
-            let (zero, coins_out) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
+            let (zero, coins_out) = swap_coins_for_coins<X, Y>(lps, clock, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zero);
             return_remaining_coin(coins_in_origin, ctx);
             transfer::public_transfer(coins_out, tx_context::sender(ctx));
         } else {
-            let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
+            let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, clock, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zero);
             return_remaining_coin(coins_in_origin, ctx);
             transfer::public_transfer(coins_out, tx_context::sender(ctx));
@@ -609,6 +637,7 @@ module defi::animeswap {
 
     public entry fun swap_coins_for_exact_coins_2_pair_batch_entry<X, Y, Z>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: vector<Coin<X>>,
         amount_out: u64,
         amount_in_max: u64,
@@ -618,6 +647,7 @@ module defi::animeswap {
         pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
         swap_coins_for_exact_coins_2_pair_entry<X, Y, Z>(
             lps,
+            clock,
             merged_coins_in_origin,
             amount_out,
             amount_in_max,
@@ -627,6 +657,7 @@ module defi::animeswap {
 
     public entry fun swap_coins_for_exact_coins_2_pair_entry<X, Y, Z>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_in_origin: Coin<X>,
         amount_out: u64,
         amount_in_max: u64,
@@ -637,20 +668,20 @@ module defi::animeswap {
         let (zeroX, zeroY, coins_mid, coins_out);
         if (compare<X, Y>()) {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-            (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
+            (zeroX, coins_mid) = swap_coins_for_coins<X, Y>(lps, clock, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zeroX);
             return_remaining_coin(coins_in_origin, ctx);
         } else {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
-            (coins_mid, zeroX) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
+            (coins_mid, zeroX) = swap_coins_for_coins<Y, X>(lps, clock, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zeroX);
             return_remaining_coin(coins_in_origin, ctx);
         };
         if (compare<Y, Z>()) {
-            (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, coins_mid, coin::zero(ctx), ctx);
+            (zeroY, coins_out) = swap_coins_for_coins<Y, Z>(lps, clock, coins_mid, coin::zero(ctx), ctx);
             coin::destroy_zero(zeroY);
         } else {
-            (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, coin::zero(ctx), coins_mid, ctx);
+            (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, clock, coin::zero(ctx), coins_mid, ctx);
             coin::destroy_zero(zeroY);
         };
         transfer::public_transfer(coins_out, tx_context::sender(ctx));
@@ -660,12 +691,13 @@ module defi::animeswap {
     /// require X < Y
     public fun swap_coins_for_coins<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_x_in: Coin<X>,
         coins_y_in: Coin<Y>,
         ctx: &mut TxContext,
     ): (Coin<X>, Coin<Y>) {
         let (balance_x_out, balance_y_out)=
-            swap_balance_for_balance<X, Y>(lps, coin::into_balance<X>(coins_x_in), coin::into_balance<Y>(coins_y_in));
+            swap_balance_for_balance<X, Y>(lps, clock, coin::into_balance<X>(coins_x_in), coin::into_balance<Y>(coins_y_in));
         (coin::from_balance<X>(balance_x_out, ctx), coin::from_balance<Y>(balance_y_out, ctx))
     }
 
@@ -673,6 +705,7 @@ module defi::animeswap {
     /// require X < Y
     public fun swap_balance_for_balance<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_x_in: Balance<X>,
         coins_y_in: Balance<Y>,
     ): (Balance<X>, Balance<Y>) {
@@ -683,11 +716,11 @@ module defi::animeswap {
         if (amount_x_in > 0) {
             let (reserve_in, reserve_out) = get_reserves_size<X, Y>(pool);
             let amount_out = get_amount_out(amount_x_in, reserve_in, reserve_out, admin_data.swap_fee);
-            swap<X, Y>(lps, coins_x_in, 0, coins_y_in, amount_out)
+            swap<X, Y>(lps, clock, coins_x_in, 0, coins_y_in, amount_out)
         } else {
             let (reserve_out, reserve_in) = get_reserves_size<X, Y>(pool);
             let amount_out = get_amount_out(amount_y_in, reserve_in, reserve_out, admin_data.swap_fee);
-            swap<X, Y>(lps, coins_x_in, amount_out, coins_y_in, 0)
+            swap<X, Y>(lps, clock, coins_x_in, amount_out, coins_y_in, 0)
         }
     }
 
@@ -695,6 +728,7 @@ module defi::animeswap {
     /// require X < Y
     public fun swap<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coins_x_in: Balance<X>,
         amount_x_out: u64,
         coins_y_in: Balance<Y>,
@@ -715,6 +749,8 @@ module defi::animeswap {
         let (balance_x, balance_y) = get_reserves_size<X, Y>(pool);
         // assert_k_increase
         assert_k_increase(admin_data, balance_x, balance_y, amount_x_in, amount_y_in, reserve_x, reserve_y);
+        // update internal
+        update_internal<X, Y>(pool, clock, balance_x, balance_y, reserve_x, reserve_y);
         // event
         event::emit(SwapEvent<X, Y> {
             amount_x_in,
@@ -729,6 +765,7 @@ module defi::animeswap {
     /// require X < Y
     public fun mint<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         coin_x: Balance<X>,
         coin_y: Balance<Y>,
     ): Balance<LPCoin<X, Y>> {
@@ -756,6 +793,8 @@ module defi::animeswap {
         };
         assert!(liquidity > 0, ERR_INSUFFICIENT_LIQUIDITY_MINT);
         let coins = balance::increase_supply(&mut pool.lp_supply, liquidity);
+        // update internal
+        update_internal<X, Y>(pool, clock, balance_x, balance_y, reserve_x, reserve_y);
         // feeOn
         if (fee_on) pool.k_last = (balance_x as u128) * (balance_y as u128);
         // event
@@ -771,6 +810,7 @@ module defi::animeswap {
     /// require X < Y
     public fun burn<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         liquidity: Balance<LPCoin<X, Y>>,
     ): (Balance<X>, Balance<Y>) {
         assert_lp_unlocked<X, Y>(lps);
@@ -787,6 +827,8 @@ module defi::animeswap {
         let y_coin_to_return = balance::split(&mut pool.coin_y_reserve, amount_y);
         let (balance_x, balance_y) = get_reserves_size(pool);
         balance::decrease_supply(&mut pool.lp_supply, liquidity);
+        // update internal
+        update_internal<X, Y>(pool, clock, balance_x, balance_y, reserve_x, reserve_y);
         // feeOn
         if (fee_on) pool.k_last = (balance_x as u128) * (balance_y as u128);
         // event
@@ -860,6 +902,35 @@ module defi::animeswap {
         } else {
             assert!(balance_x_adjusted * balance_y_adjusted >= balance_xy_old_not_scaled * scale, ERR_K_ERROR)
         };
+    }
+
+    /// update cumulative, coin_reserve, block_timestamp
+    fun update_internal<X, Y>(
+        pool: &mut LiquidityPool<X, Y>,
+        clock: &Clock,
+        balance_x: u64, // new reserve value
+        balance_y: u64,
+        reserve_x: u64, // old reserve value
+        reserve_y: u64
+    ) {
+        let now = clock::timestamp_ms(clock);
+        let time_elapsed = ((now - pool.last_block_timestamp) as u128);
+        if (time_elapsed > 0 && reserve_x != 0 && reserve_y != 0) {
+            // allow overflow u128
+            let last_price_x_cumulative_delta = uq64x64::to_u128(uq64x64::fraction(reserve_y, reserve_x)) * time_elapsed;
+            pool.last_price_x_cumulative = overflow_add(pool.last_price_x_cumulative, last_price_x_cumulative_delta);
+
+            let last_price_y_cumulative_delta = uq64x64::to_u128(uq64x64::fraction(reserve_x, reserve_y)) * time_elapsed;
+            pool.last_price_y_cumulative = overflow_add(pool.last_price_y_cumulative, last_price_y_cumulative_delta);
+        };
+        pool.last_block_timestamp = now;
+        // event
+        event::emit(SyncEvent<X, Y> {
+            reserve_x: balance_x,
+            reserve_y: balance_y,
+            last_price_x_cumulative: pool.last_price_x_cumulative,
+            last_price_y_cumulative: pool.last_price_y_cumulative,
+        });
     }
 
     /**
@@ -980,6 +1051,7 @@ module defi::animeswap {
 
     public fun pay_flash_swap<X, Y>(
         lps: &mut LiquidityPools,
+        clock: &Clock,
         x_in: Balance<X>,
         y_in: Balance<Y>,
         flash_swap: FlashSwap<X, Y>,
@@ -1006,6 +1078,9 @@ module defi::animeswap {
         let balance_x = balance::value(&pool.coin_x_reserve);
         let balance_y = balance::value(&pool.coin_y_reserve);
         assert_k_increase(admin_data, balance_x, balance_y, amount_x_in, amount_y_in, reserve_x, reserve_y);
+        // update internal
+        update_internal<X, Y>(pool, clock, balance_x, balance_y, reserve_x, reserve_y);
+
         pool.locked = false;
         // event
         event::emit(FlashSwapEvent<X, Y> {
@@ -1036,6 +1111,7 @@ module defi::animeswap_tests {
     use sui::coin::{Self, Coin};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
     use defi::animeswap::{Self, LiquidityPools, LPCoin};
+    use sui::clock::{Self, Clock};
     // use std::debug;
 
     const TEST_ERROR: u64 = 10000;
@@ -1053,6 +1129,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
+            clock::create_for_testing(ctx(test));
         };
         next_tx(&mut scenario, two);
         {
@@ -1065,8 +1142,10 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(10000, ctx(test)),
                 mint<TestCoin2>(20000, ctx(test)),
                 10000,
@@ -1076,14 +1155,17 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 9000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(10000, ctx(test)),
                 mint<TestCoin2>(20000, ctx(test)),
                 10000,
@@ -1094,14 +1176,17 @@ module defi::animeswap_tests {
             );
 
             assert!(burn(lp_coins) == 10000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let (coin_x, coin_y) = animeswap::remove_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<LPCoin<TestCoin1, TestCoin2>>(1000, ctx(test)),
                 500,
                 1,
@@ -1111,6 +1196,7 @@ module defi::animeswap_tests {
 
             assert!(burn(coin_x) == 500, TEST_ERROR);
             assert!(burn(coin_y) == 500, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         test::end(scenario);
@@ -1124,6 +1210,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
+            clock::create_for_testing(ctx(test));
         };
         next_tx(&mut scenario, owner);
         {
@@ -1136,8 +1223,10 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(10000, ctx(test)),
                 mint<TestCoin2>(20000, ctx(test)),
                 10000,
@@ -1147,34 +1236,41 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 9000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let (zero, coins_out) = animeswap::swap_coins_for_coins<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(1000, ctx(test)),
                 coin::zero(ctx(test)),
                 ctx(test),
             );
             coin::destroy_zero(zero);
             assert!(burn(coins_out) == 906, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let (coins_out, zero) = animeswap::swap_coins_for_coins<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 coin::zero(ctx(test)),
                 mint<TestCoin2>(1000, ctx(test)),
                 ctx(test),
             );
             coin::destroy_zero(zero);
             assert!(burn(coins_out) == 1086, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         test::end(scenario);
@@ -1188,6 +1284,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
+            clock::create_for_testing(ctx(test));
         };
         next_tx(&mut scenario, owner);
         {
@@ -1201,8 +1298,10 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(1000000, ctx(test)),
                 mint<TestCoin2>(4000000, ctx(test)),
                 1000000,
@@ -1212,14 +1311,17 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
                 &mut lps,
+                &clock,
                 mint<TestCoin2>(1000000, ctx(test)),
                 mint<TestCoin3>(4000000, ctx(test)),
                 1000000,
@@ -1229,19 +1331,23 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             animeswap::swap_exact_coins_for_coins_2_pair_entry<TestCoin1, TestCoin2, TestCoin3>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(1000, ctx(test)),
                 1000,
                 1,
                 ctx(test),
             );
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1263,6 +1369,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
+            clock::create_for_testing(ctx(test));
         };
         next_tx(&mut scenario, owner);
         {
@@ -1276,8 +1383,10 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(1000000, ctx(test)),
                 mint<TestCoin2>(4000000, ctx(test)),
                 1000000,
@@ -1287,14 +1396,17 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
                 &mut lps,
+                &clock,
                 mint<TestCoin2>(1000000, ctx(test)),
                 mint<TestCoin3>(4000000, ctx(test)),
                 1000000,
@@ -1304,19 +1416,23 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             animeswap::swap_coins_for_exact_coins_2_pair_entry<TestCoin1, TestCoin2, TestCoin3>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(20000, ctx(test)),
                 15825,
                 10000000000,
                 ctx(test),
             );
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1339,6 +1455,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
+            clock::create_for_testing(ctx(test));
         };
         next_tx(&mut scenario, owner);
         {
@@ -1352,8 +1469,10 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(1000000, ctx(test)),
                 mint<TestCoin2>(4000000, ctx(test)),
                 1000000,
@@ -1363,14 +1482,17 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
                 &mut lps,
+                &clock,
                 mint<TestCoin2>(1000000, ctx(test)),
                 mint<TestCoin3>(4000000, ctx(test)),
                 1000000,
@@ -1380,19 +1502,23 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             animeswap::swap_exact_coins_for_coins_2_pair_entry<TestCoin3, TestCoin2, TestCoin1>(
                 &mut lps,
+                &clock,
                 mint<TestCoin3>(100000, ctx(test)),
                 99984,
                 1,
                 ctx(test),
             );
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
@@ -1415,6 +1541,7 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
+            clock::create_for_testing(ctx(test));
         };
         next_tx(&mut scenario, owner);
         {
@@ -1428,8 +1555,10 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin1, TestCoin2>(
                 &mut lps,
+                &clock,
                 mint<TestCoin1>(1000000, ctx(test)),
                 mint<TestCoin2>(4000000, ctx(test)),
                 1000000,
@@ -1439,14 +1568,17 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             let lp_coins = animeswap::add_liquidity<TestCoin2, TestCoin3>(
                 &mut lps,
+                &clock,
                 mint<TestCoin2>(1000000, ctx(test)),
                 mint<TestCoin3>(4000000, ctx(test)),
                 1000000,
@@ -1456,19 +1588,23 @@ module defi::animeswap_tests {
                 ctx(test),
             );
             assert!(burn(lp_coins) == 1999000, TEST_ERROR);
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
         {
             let test = &mut scenario;
             let lps = test::take_shared<LiquidityPools>(test);
+            let clock = test::take_shared<Clock>(test);
             animeswap::swap_coins_for_exact_coins_2_pair_entry<TestCoin3, TestCoin2, TestCoin1>(
                 &mut lps,
+                &clock,
                 mint<TestCoin3>(200000, ctx(test)),
                 6024,
                 1000000,
                 ctx(test),
             );
+            test::return_shared(clock);
             test::return_shared(lps);
         };
         next_tx(&mut scenario, one);
