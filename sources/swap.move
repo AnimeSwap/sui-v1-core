@@ -236,7 +236,7 @@ module defi::animeswap {
         if (coin::value(&coin) == 0) {
             coin::destroy_zero(coin);
         } else {
-            transfer::transfer(coin, tx_context::sender(ctx));
+            transfer::public_transfer(coin, tx_context::sender(ctx));
         };
     }
 
@@ -368,7 +368,7 @@ module defi::animeswap {
             amount_y_min,
             ctx,
         );
-        transfer::transfer(lp_coins, tx_context::sender(ctx));
+        transfer::public_transfer(lp_coins, tx_context::sender(ctx));
     }
 
     /// remove liqudity entry function
@@ -409,8 +409,8 @@ module defi::animeswap {
             amount_y_min,
             ctx,
         );
-        transfer::transfer(coin_x, tx_context::sender(ctx));
-        transfer::transfer(coin_y, tx_context::sender(ctx));
+        transfer::public_transfer(coin_x, tx_context::sender(ctx));
+        transfer::public_transfer(coin_y, tx_context::sender(ctx));
     }
 
     /// add liqudity
@@ -503,14 +503,14 @@ module defi::animeswap {
             coin::destroy_zero(zero);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
             return_remaining_coin(coins_in_origin, ctx);
-            transfer::transfer(coins_out, tx_context::sender(ctx));
+            transfer::public_transfer(coins_out, tx_context::sender(ctx));
         } else {
             let coins_in = coin::split(&mut coins_in_origin, amount_in, ctx);
             let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zero);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
             return_remaining_coin(coins_in_origin, ctx);
-            transfer::transfer(coins_out, tx_context::sender(ctx));
+            transfer::public_transfer(coins_out, tx_context::sender(ctx));
         }
     }
 
@@ -561,7 +561,7 @@ module defi::animeswap {
             coin::destroy_zero(zeroY);
             assert!(coin::value(&coins_out) >= amount_out_min, ERR_INSUFFICIENT_OUTPUT_AMOUNT);
         };
-        transfer::transfer(coins_out, tx_context::sender(ctx));
+        transfer::public_transfer(coins_out, tx_context::sender(ctx));
     }
 
     /// entry, swap from X to exact Y
@@ -598,12 +598,12 @@ module defi::animeswap {
             let (zero, coins_out) = swap_coins_for_coins<X, Y>(lps, coins_in, coin::zero(ctx), ctx);
             coin::destroy_zero(zero);
             return_remaining_coin(coins_in_origin, ctx);
-            transfer::transfer(coins_out, tx_context::sender(ctx));
+            transfer::public_transfer(coins_out, tx_context::sender(ctx));
         } else {
             let (coins_out, zero) = swap_coins_for_coins<Y, X>(lps, coin::zero(ctx), coins_in, ctx);
             coin::destroy_zero(zero);
             return_remaining_coin(coins_in_origin, ctx);
-            transfer::transfer(coins_out, tx_context::sender(ctx));
+            transfer::public_transfer(coins_out, tx_context::sender(ctx));
         }
     }
 
@@ -653,7 +653,7 @@ module defi::animeswap {
             (coins_out, zeroY) = swap_coins_for_coins<Z, Y>(lps, coin::zero(ctx), coins_mid, ctx);
             coin::destroy_zero(zeroY);
         };
-        transfer::transfer(coins_out, tx_context::sender(ctx));
+        transfer::public_transfer(coins_out, tx_context::sender(ctx));
     }
 
     /// swap from Coin to Coin, both sides
@@ -915,7 +915,7 @@ module defi::animeswap {
         let amount = balance::value(&pool.lp_coin_reserve) - MINIMUM_LIQUIDITY;
         let balance_out = balance::split(&mut pool.lp_coin_reserve, amount);
         let coins_out = coin::from_balance(balance_out, ctx);
-        transfer::transfer(coins_out, tx_context::sender(ctx));
+        transfer::public_transfer(coins_out, tx_context::sender(ctx));
     }
 
     /// pause swap, only remove lp is allowed
@@ -1032,7 +1032,7 @@ module defi::animeswap {
 
 #[test_only]
 module defi::animeswap_tests {
-    use sui::coin::{mint_for_testing as mint, destroy_for_testing as burn};
+    use sui::coin::{mint_for_testing as mint, burn_for_testing as burn};
     use sui::coin::{Self, Coin};
     use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
     use defi::animeswap::{Self, LiquidityPools, LPCoin};
