@@ -1,9 +1,7 @@
 module defi::animeswap {
     use sui::object::{Self, UID};
     use sui::coin::{Self, Coin};
-    // use std::option;
     use sui::balance::{Self, Supply, Balance};
-    // use sui::sui::SUI;
     use sui::transfer;
     use sui::math;
     use sui::tx_context::{Self, TxContext};
@@ -12,7 +10,6 @@ module defi::animeswap {
     use std::vector;
     use sui::event;
     use sui::dynamic_object_field as ofield;
-    use sui::pay;
     use sui::clock::{Self, Clock};
     use defi::animeswap_library::{quote, sqrt, get_amount_out, get_amount_in, compare, is_overflow_mul, overflow_add};
     use defi::uq64x64;
@@ -326,34 +323,6 @@ module defi::animeswap {
 
     /// add liqudity entry function
     /// require X < Y
-    public entry fun add_liquidity_batch_entry<X, Y>(
-        lps: &mut LiquidityPools,
-        clock: &Clock,
-        coin_x_origin: vector<Coin<X>>,
-        coin_y_origin: vector<Coin<Y>>,
-        amount_x_desired: u64,
-        amount_y_desired: u64,
-        amount_x_min: u64,
-        amount_y_min: u64,
-        ctx: &mut TxContext,
-    ) {
-        let merged_coin_x_in = vector::pop_back(&mut coin_x_origin);
-        pay::join_vec(&mut merged_coin_x_in, coin_x_origin);
-        let merged_coin_y_in = vector::pop_back(&mut coin_y_origin);
-        pay::join_vec(&mut merged_coin_y_in, coin_y_origin);
-        add_liquidity_entry<X, Y>(
-            lps,
-            clock,
-            merged_coin_x_in,
-            merged_coin_y_in,
-            amount_x_desired,
-            amount_y_desired,
-            amount_x_min,
-            amount_y_min,
-            ctx
-        );
-    }
-
     public entry fun add_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
         clock: &Clock,
@@ -386,28 +355,6 @@ module defi::animeswap {
 
     /// remove liqudity entry function
     /// require X < Y
-    public entry fun remove_liquidity_batch_entry<X, Y>(
-        lps: &mut LiquidityPools,
-        clock: &Clock,
-        liquidity: vector<Coin<LPCoin<X, Y>>>,
-        liquidity_desired: u64,
-        amount_x_min: u64,
-        amount_y_min: u64,
-        ctx: &mut TxContext,
-    ) {
-        let merged_liquidity_in = vector::pop_back(&mut liquidity);
-        pay::join_vec(&mut merged_liquidity_in, liquidity);
-        remove_liquidity_entry<X, Y>(
-            lps,
-            clock,
-            merged_liquidity_in,
-            liquidity_desired,
-            amount_x_min,
-            amount_y_min,
-            ctx
-        );
-    }
-
     public entry fun remove_liquidity_entry<X, Y>(
         lps: &mut LiquidityPools,
         clock: &Clock,
@@ -491,26 +438,6 @@ module defi::animeswap {
 
     /// entry, swap from exact X to Y
     /// no require for X Y order
-    public entry fun swap_exact_coins_for_coins_batch_entry<X, Y>(
-        lps: &mut LiquidityPools,
-        clock: &Clock,
-        coins_in_origin: vector<Coin<X>>,
-        amount_in: u64,
-        amount_out_min: u64,
-        ctx: &mut TxContext,
-    ) {
-        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
-        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
-        swap_exact_coins_for_coins_entry<X, Y>(
-            lps,
-            clock,
-            merged_coins_in_origin,
-            amount_in,
-            amount_out_min,
-            ctx
-        );
-    }
-
     public entry fun swap_exact_coins_for_coins_entry<X, Y>(
         lps: &mut LiquidityPools,
         clock: &Clock,
@@ -537,26 +464,6 @@ module defi::animeswap {
     }
 
     /// entry, swap from exact X to Y to Z
-    public entry fun swap_exact_coins_for_coins_2_pair_batch_entry<X, Y, Z>(
-        lps: &mut LiquidityPools,
-        clock: &Clock,
-        coins_in_origin: vector<Coin<X>>,
-        amount_in: u64,
-        amount_out_min: u64,
-        ctx: &mut TxContext,
-    ) {
-        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
-        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
-        swap_exact_coins_for_coins_2_pair_entry<X, Y, Z>(
-            lps,
-            clock,
-            merged_coins_in_origin,
-            amount_in,
-            amount_out_min,
-            ctx
-        );
-    }
-
     public entry fun swap_exact_coins_for_coins_2_pair_entry<X, Y, Z>(
         lps: &mut LiquidityPools,
         clock: &Clock,
@@ -591,26 +498,6 @@ module defi::animeswap {
 
     /// entry, swap from X to exact Y
     /// no require for X Y order
-    public entry fun swap_coins_for_exact_coins_batch_entry<X, Y>(
-        lps: &mut LiquidityPools,
-        clock: &Clock,
-        coins_in_origin: vector<Coin<X>>,
-        amount_out: u64,
-        amount_in_max: u64,
-        ctx: &mut TxContext,
-    ) {
-        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
-        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
-        swap_coins_for_exact_coins_entry<X, Y>(
-            lps,
-            clock,
-            merged_coins_in_origin,
-            amount_out,
-            amount_in_max,
-            ctx
-        );
-    }
-
     public entry fun swap_coins_for_exact_coins_entry<X, Y>(
         lps: &mut LiquidityPools,
         clock: &Clock,
@@ -633,26 +520,6 @@ module defi::animeswap {
             return_remaining_coin(coins_in_origin, ctx);
             transfer::public_transfer(coins_out, tx_context::sender(ctx));
         }
-    }
-
-    public entry fun swap_coins_for_exact_coins_2_pair_batch_entry<X, Y, Z>(
-        lps: &mut LiquidityPools,
-        clock: &Clock,
-        coins_in_origin: vector<Coin<X>>,
-        amount_out: u64,
-        amount_in_max: u64,
-        ctx: &mut TxContext,
-    ) {
-        let merged_coins_in_origin = vector::pop_back(&mut coins_in_origin);
-        pay::join_vec(&mut merged_coins_in_origin, coins_in_origin);
-        swap_coins_for_exact_coins_2_pair_entry<X, Y, Z>(
-            lps,
-            clock,
-            merged_coins_in_origin,
-            amount_out,
-            amount_in_max,
-            ctx
-        );
     }
 
     public entry fun swap_coins_for_exact_coins_2_pair_entry<X, Y, Z>(
