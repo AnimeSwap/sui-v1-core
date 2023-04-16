@@ -996,7 +996,8 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            clock::create_for_testing(ctx(test));
+            let clock = clock::create_for_testing(ctx(test));
+            clock::share_for_testing(clock);
         };
         next_tx(&mut scenario, two);
         {
@@ -1077,7 +1078,8 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            clock::create_for_testing(ctx(test));
+            let clock = clock::create_for_testing(ctx(test));
+            clock::share_for_testing(clock);
         };
         next_tx(&mut scenario, owner);
         {
@@ -1151,7 +1153,8 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            clock::create_for_testing(ctx(test));
+            let clock = clock::create_for_testing(ctx(test));
+            clock::share_for_testing(clock);
         };
         next_tx(&mut scenario, owner);
         {
@@ -1236,7 +1239,8 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            clock::create_for_testing(ctx(test));
+            let clock = clock::create_for_testing(ctx(test));
+            clock::share_for_testing(clock);
         };
         next_tx(&mut scenario, owner);
         {
@@ -1322,7 +1326,8 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            clock::create_for_testing(ctx(test));
+            let clock = clock::create_for_testing(ctx(test));
+            clock::share_for_testing(clock);
         };
         next_tx(&mut scenario, owner);
         {
@@ -1408,7 +1413,8 @@ module defi::animeswap_tests {
         {
             let test = &mut scenario;
             animeswap::init_for_testing(ctx(test));
-            clock::create_for_testing(ctx(test));
+            let clock = clock::create_for_testing(ctx(test));
+            clock::share_for_testing(clock);
         };
         next_tx(&mut scenario, owner);
         {
