@@ -18,7 +18,7 @@ Update your `Move.toml` with
 ```toml
 [dependencies.animeSwap]
 git = 'https://github.com/AnimeSwap/sui-v1-core.git'
-rev = '0.0.2'
+rev = '1.0.0'
 ```
 
 -----

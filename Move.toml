@@ -1,12 +1,12 @@
 [package]
 name = "animeswap"
-version = "0.0.2"
+version = "1.0.0"
 
 [dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "testnet-1.0.0" }
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "sui-v1.0.0" }
 
 [addresses]
 defi = "0x0"
 sui = "0x2"
 std = "0x1"
-deployer = "0xd7086a6284d01b710286a384d81761657b41ebef78e652e720d38c311bfd1678"
+deployer = "0x2ab6bc284091a0dd94f9533f756549fe7583e51c79d0b10bacd5d9816ccf8f74"
