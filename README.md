@@ -2,7 +2,7 @@
 
 **AnimeSwap** is AMM protocol for [Aptos](https://www.aptos.com/) and [SUI](https://sui.io/) blockchain. 
 
-* [Contracts documents](https://docs.animeswap.org/docs/contracts)
+* [Contracts documents](https://docs.animeswap.org/docs/contracts/Sui/contracts)
 * [SDK](https://github.com/AnimeSwap/sui-v1-sdk)
 
 The current repository contains: 
